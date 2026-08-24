@@ -203,7 +203,8 @@ def _render_repair_advice(
     if stale:
         docs = sorted({c.doc_file for c in stale})
         lines.append(
-            f"• [bold red]Doc Synchronization:[/bold red] 代码已被修改，但对应的文档未同步更新！\n"
+            f"• [bold red]Doc Synchronization:[/bold red] Code was modified, but the "
+            "referencing docs were not updated in sync!\n"
             f"  Update and [bold]git add[/bold]: {', '.join(docs)}"
         )
     if oversized:

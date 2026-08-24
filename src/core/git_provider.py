@@ -1,0 +1,91 @@
+"""Incremental Git diff scanning engine.
+
+Collects staged file boundaries via ``git diff --cached`` — the single
+source of truth for incremental lint targets. The linter never performs
+full-repository scans; all check targets must originate from this module.
+"""
+
+import subprocess
+from dataclasses import dataclass, field
+from typing import NoReturn
+
+from rich.console import Console
+from rich.text import Text
+
+console = Console()
+
+
+@dataclass
+class StagedChanges:
+    """Categorized file paths collected from the Git staging area.
+
+    @shape code_files: list[str]
+    @shape doc_files: list[str]
+    @source code_files: git-index#command:diff --cached --name-only
+    """
+
+    code_files: list[str] = field(default_factory=list)
+    doc_files: list[str] = field(default_factory=list)
+
+
+class GitProvider:
+    """Collects incremental change boundaries from the Git staging area."""
+
+    def collect_staged_changes(self) -> StagedChanges:
+        """Run ``git diff --cached --name-only`` and classify the results.
+
+        Returns:
+            StagedChanges with ``.py`` files under ``code_files`` and
+            ``.md`` files under ``doc_files``.
+
+        Exits with code 1 (via rich error message) when the working
+        directory is not a Git repository or the git command fails.
+
+        @shape stdout: list[str] (one relative path per line)
+        @shape return: StagedChanges(code_files, doc_files)
+        @source stdout: git-index#command:diff --cached --name-only
+        """
+        try:
+            result = subprocess.run(
+                ["git", "diff", "--cached", "--name-only"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except FileNotFoundError:
+            self._fail(
+                "Git executable not found. "
+                "Please ensure `git` is installed and available on PATH."
+            )
+        except subprocess.CalledProcessError as exc:
+            # Keep only the first stderr line: git dumps long usage text
+            # after a fatal error, which would flood the terminal.
+            stderr = (exc.stderr or "").strip().splitlines()
+            first_line = stderr[0] if stderr else "unknown error"
+            if "not a git repository" in first_line.lower():
+                self._fail(
+                    "Current directory is not a Git repository. "
+                    "Run `git init` before invoking OmniAtlas."
+                )
+            self._fail(f"Git command failed: {first_line}")
+
+        changes = StagedChanges()
+        for line in result.stdout.splitlines():
+            path = line.strip()
+            if not path:
+                continue
+            if path.endswith(".py"):
+                changes.code_files.append(path)
+            elif path.endswith(".md"):
+                changes.doc_files.append(path)
+        return changes
+
+    @staticmethod
+    def _fail(message: str) -> NoReturn:
+        """Print a friendly rich error and halt execution with exit code 1."""
+        # Render as plain Text: git stderr may contain brackets that would
+        # otherwise be misparsed as rich markup tags.
+        text = Text("✖ Error: ", style="bold red")
+        text.append(message, style="red")
+        console.print(text)
+        raise SystemExit(1)

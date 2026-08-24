@@ -1,0 +1,12 @@
+[project]
+name = "omniatlas"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "rich>=15.0.0",
+    "tree-sitter>=0.26.0",
+    "tree-sitter-python>=0.25.0",
+    "typer>=0.26.8",
+]

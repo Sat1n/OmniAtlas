@@ -31,7 +31,7 @@ OmniAtlas utilizes a rigorous layered abstraction design, allowing multi-tiered 
 
 * **`BLUEPRINT.md` (Meta-Specification)**: The constitution and operational standard of the project. It explicitly defines the documentation layers (L1, L2, L3), naming conventions, and link-graph protocols.
 * **L1 — `AGENTS.md` (Global Panorama - Root)**: High-level system architecture, core technology/business domains, hard constraints, and foundational design rationales.
-* **L2 — `[Module].md` (Sub-domain Index - Sub-folder)**: Index documents named after their respective directories (e.g., `utils.md`, `finance.md`). They define the architecture of specific modules and link downward progressively to prevent document bloat.
+* **L2 — `README.md` (Sub-domain Index - Sub-folder)**: They define the architecture of specific modules and link downward progressively to prevent document bloat.
 * **L3 — Node-Level Detail (Source Files & Comments)**: Deep dive into physical source files. Specialized entities (e.g., deep learning custom environments, complex functional pipelines) must explicitly document input/output shapes, upstream dependencies, and exact semantic definitions.
 
 ---

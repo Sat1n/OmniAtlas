@@ -15,7 +15,7 @@ Implements the bidirectional collision check plus the token guard:
 from dataclasses import dataclass
 from pathlib import Path
 
-from core.git_provider import StagedChanges
+from core.git_provider import IGNORED_DIRS, StagedChanges
 from core.parser import (
     MarkdownParser,
     PythonASTParser,
@@ -26,9 +26,6 @@ from core.parser import (
 #: Token ceilings defined by BLUEPRINT §1 zoom levels.
 L1_TOKEN_LIMIT = 2000
 L2_TOKEN_LIMIT = 4000
-
-#: Directories never scanned for project documentation.
-_IGNORED_DIRS = {".git", ".venv", "node_modules", "__pycache__"}
 
 
 @dataclass
@@ -138,7 +135,7 @@ class LinterEngine:
         """List project Markdown files, skipping vendored/hidden trees."""
         docs: list[Path] = []
         for path in sorted(self._root.rglob("*.md")):
-            if any(part in _IGNORED_DIRS for part in path.parts):
+            if any(part in IGNORED_DIRS for part in path.parts):
                 continue
             docs.append(path)
         return docs

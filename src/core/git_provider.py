@@ -1,18 +1,24 @@
 """Incremental Git diff scanning engine.
 
-Collects staged file boundaries via ``git diff --cached`` — the single
-source of truth for incremental lint targets. The linter never performs
-full-repository scans; all check targets must originate from this module.
+Collects staged file boundaries via ``git diff --cached`` — the default
+source of truth for incremental lint targets. ``check`` routes never
+perform full-repository scans; the opt-in full sweep
+(:meth:`GitProvider.collect_all_files`) exists exclusively for the
+CI-oriented ``omni-atlas check --all`` mode.
 """
 
 import subprocess
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import NoReturn
 
 from rich.console import Console
 from rich.text import Text
 
 console = Console()
+
+#: Directories never scanned for project files (shared with ``linter.py``).
+IGNORED_DIRS = {".git", ".venv", "node_modules", "__pycache__"}
 
 
 @dataclass
@@ -78,6 +84,33 @@ class GitProvider:
                 changes.code_files.append(path)
             elif path.endswith(".md"):
                 changes.doc_files.append(path)
+        return changes
+
+    def collect_all_files(self, root: str | Path = ".") -> StagedChanges:
+        """Walk the entire project tree and classify ``.py`` / ``.md`` files.
+
+        Powers the CI-oriented full scan (``omni-atlas check --all``).
+        Vendored and hidden trees (``.venv``, ``__pycache__``, ``.git``,
+        any dot-directory) are skipped; results reuse the
+        :class:`StagedChanges` shape so both scan modes feed the same
+        downstream pipeline.
+
+        @shape return: StagedChanges(code_files, doc_files)
+        @source root: filesystem#path:. (repository root)
+        """
+        changes = StagedChanges()
+        for path in sorted(Path(root).rglob("*")):
+            if not path.is_file():
+                continue
+            if any(
+                part in IGNORED_DIRS or part.startswith(".")
+                for part in path.parts
+            ):
+                continue
+            if path.suffix == ".py":
+                changes.code_files.append(path.as_posix())
+            elif path.suffix == ".md":
+                changes.doc_files.append(path.as_posix())
         return changes
 
     @staticmethod

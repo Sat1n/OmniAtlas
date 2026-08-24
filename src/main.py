@@ -8,8 +8,10 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from core.git_provider import GitProvider, StagedChanges
+from core.installer import HookInstaller, InstallResult
 from core.linter import AnchorCheck, LinterEngine, SyncCheck, TokenCheck
 
 VERSION = "0.0.1"
@@ -23,21 +25,38 @@ console = Console()
 
 
 @app.command()
-def check() -> None:
-    """Run an incremental lint pass over the Git staging area."""
+def check(
+    all: bool = typer.Option(
+        False,
+        "--all",
+        "-a",
+        help="Scan every project file instead of only the Git staging area (CI mode).",
+    ),
+) -> None:
+    """Run an incremental lint pass over the Git staging area.
+
+    Default mode inspects only staged files (pre-commit fast gate);
+    ``--all`` performs a full-project sweep (CI/CD pipeline mode).
+    """
     console.print(
         f"[bold green]Initializing OmniAtlas Linter v{VERSION}...[/bold green]"
     )
 
-    changes = GitProvider().collect_staged_changes()
+    provider = GitProvider()
+    if all:
+        changes = provider.collect_all_files()
+        mode_title = "Full Project Scan"
+    else:
+        changes = provider.collect_staged_changes()
+        mode_title = "Staged Changes Detected"
 
     if not changes.code_files and not changes.doc_files:
         console.print(
-            "[yellow]No staged changes detected. Everything is clean.[/yellow]"
+            "[yellow]No target files detected. Everything is clean.[/yellow]"
         )
         raise typer.Exit(code=0)
 
-    _render_changes(changes)
+    _render_changes(changes, mode_title)
 
     engine = LinterEngine()
     anchor_checks = engine.check_anchors(changes.doc_files)
@@ -60,7 +79,46 @@ def check() -> None:
     raise typer.Exit(code=0)
 
 
-def _render_changes(changes: StagedChanges) -> None:
+@app.command()
+def init() -> None:
+    """Install the OmniAtlas pre-commit Git hook (idempotent)."""
+    try:
+        result = HookInstaller().install()
+    except RuntimeError as exc:
+        text = Text("✖ Error: ", style="bold red")
+        text.append(str(exc), style="red")
+        console.print(text)
+        raise typer.Exit(code=1)
+
+    _render_install_result(result)
+    raise typer.Exit(code=0)
+
+
+def _render_install_result(result: InstallResult) -> None:
+    """Friendly Rich panel summarizing the hook installation outcome."""
+    messages = {
+        "created": "pre-commit hook created",
+        "appended": "OmniAtlas guard appended to the existing pre-commit hook",
+        "updated": "existing OmniAtlas guard block refreshed",
+        "unchanged": "hook already installed — nothing to do",
+    }
+    body = (
+        f"✔ [bold green]{messages[result.status]}[/bold green]\n"
+        f"  Hook path: [cyan]{result.hook_path}[/cyan]\n\n"
+        "From now on every [bold]git commit[/bold] automatically runs "
+        "[bold]omni-atlas check[/bold] on the staging area.\n"
+        "Try it: modify a [cyan].py[/cyan] symbol without syncing the "
+        "referencing docs — the commit will be blocked."
+    )
+    title = (
+        "OmniAtlas Git Hook Already Installed"
+        if result.status == "unchanged"
+        else "OmniAtlas Git Hook Installed"
+    )
+    console.print(Panel(body, title=title, border_style="green"))
+
+
+def _render_changes(changes: StagedChanges, title: str) -> None:
     """Pretty-print staged code/doc files as a rich table inside a panel."""
     table = Table(show_header=True, header_style="bold magenta", expand=False)
     table.add_column("Type", justify="center", no_wrap=True)
@@ -73,7 +131,7 @@ def _render_changes(changes: StagedChanges) -> None:
 
     panel = Panel(
         table,
-        title="Staged Changes Detected",
+        title=title,
         subtitle=(
             f"{len(changes.code_files)} code · {len(changes.doc_files)} docs"
         ),

@@ -19,6 +19,7 @@ the Git staging area — full-repository scans are architecturally forbidden.
 | `git_provider.py` | Incremental Git diff scanning engine (staging area collection) |
 | `parser.py` | Markdown anchor extraction & Tree-sitter AST symbol verification |
 | `linter.py` | Bidirectional collision check & token budget guard |
+| `installer.py` | One-shot pre-commit hook installer (`omni-atlas init`) |
 
 ## Symbol Anchors
 
@@ -26,6 +27,7 @@ the Git staging area — full-repository scans are architecturally forbidden.
 
 * Staged file collector: [GitProvider](src/core/git_provider.py#class:GitProvider)
 * Incremental boundary collection: [collect_staged_changes](src/core/git_provider.py#function:collect_staged_changes)
+* Full-project CI sweep: [collect_all_files](src/core/git_provider.py#function:collect_all_files)
 * Classified staging result: [StagedChanges](src/core/git_provider.py#class:StagedChanges)
 
 ### Parsing Engines (`parser.py`)
@@ -41,6 +43,12 @@ the Git staging area — full-repository scans are architecturally forbidden.
 * Reverse sync record: [SyncCheck](src/core/linter.py#class:SyncCheck)
 * Token budget record: [TokenCheck](src/core/linter.py#class:TokenCheck)
 
+### Hook Installer (`installer.py`)
+
+* Pre-commit hook installer: [HookInstaller](src/core/installer.py#class:HookInstaller)
+* Idempotent guard injection: [install](src/core/installer.py#function:install)
+* Installation outcome record: [InstallResult](src/core/installer.py#class:InstallResult)
+
 ## Data Flow
 
 ```
@@ -53,4 +61,7 @@ the Git staging area — full-repository scans are architecturally forbidden.
 [Staged Code] ──> [LinterEngine] ──(reverse scan)──> [IN SYNC / STALE DOC]
                         │
               (token budget)──> [PASS / OVERSIZED]
+
+[Full Project] ──> [collect_all_files] ──(--all CI sweep)──> [main.check]
+[omni-atlas init] ──> [HookInstaller] ──> [.git/hooks/pre-commit]
 ```

@@ -113,6 +113,38 @@ class GitProvider:
                 changes.doc_files.append(path.as_posix())
         return changes
 
+    def collect_modified_files(self, root: str | Path = ".") -> list[str]:
+        """List every path carrying staged, unstaged or untracked changes.
+
+        Backs the topology graph status overlay (PASS / MODIFIED / STALE).
+        Renames are reported under their new path; C-quoted paths emitted
+        by git for special characters are unwrapped.
+
+        @shape return: list[str] (repository-relative POSIX paths)
+        @source stdout: git#command:status --porcelain
+        """
+        try:
+            result = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            return []
+
+        modified: list[str] = []
+        for line in result.stdout.splitlines():
+            if len(line) < 4:
+                continue
+            raw = line[3:].strip()
+            # Renames: "R  old/path.py -> new/path.py" — keep the target.
+            if " -> " in raw:
+                raw = raw.rsplit(" -> ", 1)[1]
+            modified.append(raw.strip('"'))
+        return modified
+
     @staticmethod
     def _fail(message: str) -> NoReturn:
         """Print a friendly rich error and halt execution with exit code 1."""

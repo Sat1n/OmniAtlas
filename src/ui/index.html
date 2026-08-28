@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OmniAtlas · Topology Dashboard</title>
+<script src="vendor/cytoscape.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #1a2129;
+    --panel-border: #2c3a47;
+    --text: #dfe6e9;
+    --text-dim: #8395a7;
+    --pass: #2ecc71;
+    --modified: #f1c40f;
+    --stale: #e74c3c;
+    --external: #7f8fa6;
+    --accent: #00cec9;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", "Noto Sans", "PingFang SC", sans-serif;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 10px 18px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--panel-border);
+    z-index: 5;
+  }
+  header h1 { font-size: 15px; font-weight: 600; letter-spacing: .4px; }
+  header h1 span { color: var(--accent); }
+  .stat {
+    font-size: 12px;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .stat .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .stat b { color: var(--text); font-variant-numeric: tabular-nums; }
+  header .spacer { flex: 1; }
+  #refresh {
+    background: transparent;
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    font-size: 12px;
+    padding: 5px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  #refresh:hover { border-color: var(--accent); color: var(--accent); }
+
+  #stage { position: relative; flex: 1; min-height: 0; }
+  #cy { position: absolute; inset: 0; }
+
+  #legend {
+    position: absolute;
+    left: 14px;
+    top: 14px;
+    background: rgba(26, 33, 41, .92);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 11.5px;
+    line-height: 1.9;
+    color: var(--text-dim);
+    z-index: 4;
+    pointer-events: none;
+  }
+  #legend .row { display: flex; align-items: center; gap: 8px; }
+  #legend .swatch { width: 12px; height: 12px; flex: none; }
+  #legend .circle { border-radius: 50%; }
+  #legend .rect { border-radius: 3px; }
+  #legend .diamond { transform: rotate(45deg) scale(.85); }
+  #legend .hex { clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); }
+  #legend hr { border: none; border-top: 1px solid var(--panel-border); margin: 6px 0; }
+
+  #banner {
+    position: absolute;
+    left: 50%;
+    top: 16px;
+    transform: translateX(-50%);
+    background: rgba(231, 76, 60, .15);
+    border: 1px solid var(--stale);
+    color: var(--stale);
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    display: none;
+    z-index: 6;
+  }
+
+  #drawer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 340px;
+    height: 100%;
+    background: var(--panel);
+    border-left: 1px solid var(--panel-border);
+    transform: translateX(100%);
+    transition: transform .18s ease-out;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+  }
+  #drawer.open { transform: translateX(0); }
+  #drawer .head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--panel-border);
+  }
+  #drawer .head h2 { font-size: 15px; word-break: break-all; }
+  #drawer .close {
+    background: none; border: none; color: var(--text-dim);
+    font-size: 18px; cursor: pointer; line-height: 1; padding: 2px 4px;
+  }
+  #drawer .close:hover { color: var(--text); }
+  #drawer .body { padding: 12px 16px; overflow-y: auto; flex: 1; font-size: 12.5px; }
+  .badges { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+  .badge {
+    font-size: 10.5px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--panel-border);
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: .6px;
+  }
+  .badge.status-PASS { color: var(--pass); border-color: var(--pass); }
+  .badge.status-MODIFIED { color: var(--modified); border-color: var(--modified); }
+  .badge.status-STALE { color: var(--stale); border-color: var(--stale); }
+  .field { margin-bottom: 12px; }
+  .field .k {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: .8px;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+  }
+  .field .v { word-break: break-all; line-height: 1.55; }
+  pre.snippet {
+    background: var(--bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    padding: 10px;
+    font-family: "JetBrains Mono", Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 220px;
+    overflow-y: auto;
+    color: #b2bec3;
+  }
+  ul.tags { list-style: none; }
+  ul.tags li {
+    background: var(--bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 5px;
+    padding: 5px 8px;
+    margin-bottom: 5px;
+    font-family: Consolas, monospace;
+    font-size: 11px;
+    word-break: break-all;
+  }
+  #hint {
+    position: absolute;
+    right: 14px;
+    bottom: 12px;
+    font-size: 11px;
+    color: var(--text-dim);
+    background: rgba(26, 33, 41, .85);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    z-index: 4;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>OmniAtlas <span>· Topology Dashboard</span></h1>
+  <div class="stat"><span class="dot" style="background:var(--pass)"></span>PASS <b id="n-pass">0</b></div>
+  <div class="stat"><span class="dot" style="background:var(--modified)"></span>MODIFIED <b id="n-mod">0</b></div>
+  <div class="stat"><span class="dot" style="background:var(--stale)"></span>STALE <b id="n-stale">0</b></div>
+  <div class="stat">nodes <b id="n-nodes">0</b> · edges <b id="n-edges">0</b></div>
+  <div class="spacer"></div>
+  <button id="refresh" title="Re-fetch /api/topology and re-layout">↻ Refresh</button>
+</header>
+
+<div id="stage">
+  <div id="cy"></div>
+
+  <div id="legend">
+    <div class="row"><span class="swatch circle" style="background:var(--pass)"></span> PASS — untouched</div>
+    <div class="row"><span class="swatch circle" style="background:var(--modified)"></span> MODIFIED — uncommitted changes</div>
+    <div class="row"><span class="swatch circle" style="background:var(--stale)"></span> STALE — doc diverged from code</div>
+    <hr>
+    <div class="row"><span class="swatch rect" style="background:var(--external)"></span> L1 / L2 document</div>
+    <div class="row"><span class="swatch hex" style="background:var(--external)"></span> class</div>
+    <div class="row"><span class="swatch circle" style="background:var(--external)"></span> function</div>
+    <div class="row"><span class="swatch diamond" style="background:var(--external)"></span> variable</div>
+  </div>
+
+  <div id="banner"></div>
+  <div id="hint">Click a node → blast-radius highlight · Click background → reset</div>
+
+  <aside id="drawer">
+    <div class="head">
+      <h2 id="drawer-title">—</h2>
+      <button class="close" id="drawer-close" title="Close">✕</button>
+    </div>
+    <div class="body" id="drawer-body"></div>
+  </aside>
+</div>
+
+<script>
+"use strict";
+
+const STATUS_COLOR = {
+  PASS: "#2ecc71",
+  MODIFIED: "#f1c40f",
+  STALE: "#e74c3c",
+};
+const EXTERNAL_COLOR = "#57606f";
+const KIND_SHAPE = {
+  l1_doc: "roundrectangle",
+  l2_doc: "roundrectangle",
+  class: "hexagon",
+  function: "ellipse",
+  var: "diamond",
+  external: "cut-rectangle",
+};
+
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => (
+  { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+));
+
+let cy = null;
+
+const CY_STYLE = [
+  {
+    selector: "node",
+    style: {
+      "background-color": (el) =>
+        el.data("kind") === "external"
+          ? EXTERNAL_COLOR
+          : STATUS_COLOR[el.data("status")] || STATUS_COLOR.PASS,
+      shape: (el) => KIND_SHAPE[el.data("kind")] || "ellipse",
+      label: "data(label)",
+      color: "#cfd8dc",
+      "font-size": 9,
+      "text-valign": "bottom",
+      "text-margin-y": 5,
+      "text-wrap": "wrap",
+      "text-max-width": "95px",
+      width: 30,
+      height: 30,
+      "border-width": 1,
+      "border-color": "#0f1419",
+      "overlay-padding": "4px",
+    },
+  },
+  {
+    selector: "node[kind = 'l1_doc'], node[kind = 'l2_doc']",
+    style: { width: 44, height: 30 },
+  },
+  {
+    selector: "node[kind = 'external']",
+    style: { "font-size": 8, "border-color": "#2c3a47", opacity: 0.9, width: 26, height: 22 },
+  },
+  {
+    selector: "edge",
+    style: {
+      width: 1.4,
+      "line-color": "#4a5a68",
+      "target-arrow-color": "#4a5a68",
+      "target-arrow-shape": "triangle",
+      "arrow-scale": 0.8,
+      "curve-style": "bezier",
+      opacity: 0.75,
+    },
+  },
+  {
+    selector: "edge[kind = 'lineage']",
+    style: { "line-color": "#00b894", "target-arrow-color": "#00b894", "line-style": "solid", width: 2 },
+  },
+  {
+    selector: "edge[kind = 'anchor']",
+    style: { "line-color": "#7f8fa6", "target-arrow-color": "#7f8fa6" },
+  },
+  {
+    selector: "edge[kind = 'source']",
+    style: { "line-color": "#6c5ce7", "target-arrow-color": "#6c5ce7", "line-style": "dashed" },
+  },
+  { selector: ".faded", style: { opacity: 0.12 } },
+  {
+    selector: ".highlight",
+    style: { "border-width": 3, "border-color": "#ffffff", "z-index": 10 },
+  },
+  {
+    selector: "edge.highlight",
+    style: { width: 2.8, opacity: 1, "z-index": 10, "line-color": "#00cec9", "target-arrow-color": "#00cec9" },
+  },
+];
+
+async function loadGraph() {
+  const banner = document.getElementById("banner");
+  banner.style.display = "none";
+  try {
+    const res = await fetch("/api/topology", { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    render(data);
+  } catch (err) {
+    banner.textContent = `Failed to load topology: ${err.message}`;
+    banner.style.display = "block";
+  }
+}
+
+function render(data) {
+  const container = document.getElementById("cy");
+  if (cy) { cy.destroy(); cy = null; }
+
+  cy = cytoscape({
+    container,
+    elements: [...data.nodes, ...data.edges],
+    style: CY_STYLE,
+    wheelSensitivity: 0.25,
+    layout: {
+      name: "cose",
+      animate: false,
+      nodeRepulsion: 220000,
+      idealEdgeLength: 90,
+      edgeElasticity: 120,
+      gravity: 0.28,
+      padding: 46,
+    },
+  });
+
+  const counts = { PASS: 0, MODIFIED: 0, STALE: 0 };
+  data.nodes.forEach((n) => {
+    if (n.data.kind !== "external") counts[n.data.status] = (counts[n.data.status] || 0) + 1;
+  });
+  document.getElementById("n-pass").textContent = counts.PASS;
+  document.getElementById("n-mod").textContent = counts.MODIFIED;
+  document.getElementById("n-stale").textContent = counts.STALE;
+  document.getElementById("n-nodes").textContent = data.nodes.length;
+  document.getElementById("n-edges").textContent = data.edges.length;
+
+  cy.on("tap", "node", (evt) => selectNode(evt.target));
+  cy.on("tap", (evt) => { if (evt.target === cy) resetHighlight(); });
+}
+
+function selectNode(node) {
+  cy.elements().addClass("faded");
+  const hood = node.closedNeighborhood();
+  hood.removeClass("faded").addClass("highlight");
+  openDrawer(node.data());
+}
+
+function resetHighlight() {
+  if (!cy) return;
+  cy.elements().removeClass("faded highlight");
+  closeDrawer();
+}
+
+function openDrawer(d) {
+  document.getElementById("drawer-title").textContent = d.label || d.id;
+  const meta = d.meta || {};
+  const parts = [];
+
+  parts.push(`<div class="badges">
+      <span class="badge">${esc(d.kind)}</span>
+      <span class="badge status-${esc(d.status)}">${esc(d.status)}</span>
+      ${meta.broken ? '<span class="badge status-STALE">broken anchor</span>' : ""}
+    </div>`);
+
+  if (d.path) parts.push(field("Path", esc(d.path) + (meta.line ? ` : ${esc(meta.line)}` : "")));
+
+  const fm = meta.frontmatter || {};
+  if (Object.keys(fm).length) {
+    const rows = Object.entries(fm)
+      .map(([k, v]) => `${esc(k)}: ${esc(Array.isArray(v) ? v.join(", ") : v)}`)
+      .join("\n");
+    parts.push(field("Frontmatter (YAML)", `<pre class="snippet">${rows}</pre>`));
+  }
+
+  if (meta.shapes && meta.shapes.length)
+    parts.push(field("@shape", `<ul class="tags">${meta.shapes.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>`));
+  if (meta.sources && meta.sources.length)
+    parts.push(field("@source", `<ul class="tags">${meta.sources.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>`));
+
+  if (meta.docstring) parts.push(field("Docstring", `<pre class="snippet">${esc(meta.docstring)}</pre>`));
+  if (meta.excerpt) parts.push(field("Excerpt", `<pre class="snippet">${esc(meta.excerpt)}</pre>`));
+
+  parts.push(field("Node ID", esc(d.id)));
+
+  document.getElementById("drawer-body").innerHTML = parts.join("");
+  document.getElementById("drawer").classList.add("open");
+}
+
+function field(key, html) {
+  return `<div class="field"><div class="k">${esc(key)}</div><div class="v">${html}</div></div>`;
+}
+
+function closeDrawer() {
+  document.getElementById("drawer").classList.remove("open");
+}
+
+document.getElementById("refresh").addEventListener("click", loadGraph);
+document.getElementById("drawer-close").addEventListener("click", resetHighlight);
+
+if (typeof cytoscape === "undefined") {
+  document.getElementById("banner").textContent =
+    "Cytoscape.js failed to load — check vendor/cytoscape.min.js";
+  document.getElementById("banner").style.display = "block";
+} else {
+  loadGraph();
+}
+</script>
+</body>
+</html>

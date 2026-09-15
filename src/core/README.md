@@ -17,10 +17,10 @@ the Git staging area — full-repository scans are architecturally forbidden.
 | File | Responsibility |
 |---|---|
 | `git_provider.py` | Incremental Git diff scanning engine (staging area collection) |
-| `parser.py` | Markdown anchor extraction & Tree-sitter AST symbol verification |
+| `parser.py` | Markdown anchor extraction, frontmatter parsing, block-safe excerpts & Tree-sitter AST symbol verification |
 | `linter.py` | Bidirectional collision check & token budget guard |
 | `installer.py` | One-shot pre-commit hook installer (`omni-atlas init`) |
-| `graph.py` | Topology DAG builder & Cytoscape.js data conversion engine |
+| `graph.py` | Topology DAG builder, Cytoscape converter & compound container grouping |
 | `server.py` | Zero-dependency stdlib web server hosting the dashboard (`omni-atlas ui`) |
 
 ## Symbol Anchors
@@ -37,6 +37,7 @@ the Git staging area — full-repository scans are architecturally forbidden.
 
 * Markdown frontmatter & anchor extractor: [MarkdownParser](src/core/parser.py#class:MarkdownParser)
 * Tree-sitter AST symbol engine: [PythonASTParser](src/core/parser.py#class:PythonASTParser)
+* Block-safe excerpt extractor: [excerpt](src/core/parser.py#function:excerpt)
 * Extracted anchor record: [SymbolAnchor](src/core/parser.py#class:SymbolAnchor)
 * Parsed document record: [MarkdownDoc](src/core/parser.py#class:MarkdownDoc)
 
@@ -56,7 +57,23 @@ the Git staging area — full-repository scans are architecturally forbidden.
 
 * DAG builder & Cytoscape converter: [TopologyGraphBuilder](src/core/graph.py#class:TopologyGraphBuilder)
 * Graph assembly entrypoint: [build](src/core/graph.py#function:build)
+* Compound container id: [BLUEPRINT_GROUP_ID](src/core/graph.py#var:BLUEPRINT_GROUP_ID)
+* File-node hierarchy: [_ensure_file_node](src/core/graph.py#function:_ensure_file_node)
+* Terminal command label formatter: [_external_cli_payload](src/core/graph.py#function:_external_cli_payload)
 * Cytoscape element export: [to_dict](src/core/graph.py#function:to_dict)
+
+Anchor edges route through intermediate ``*.py`` file nodes
+(doc ➔ file ➔ symbol) so leaf symbols never fan out directly from the
+L2 module hub. Unresolved frontmatter ``inputs`` / ``outputs`` are
+modeled as ``io_node`` placeholders (⬇ input rhomboid / cyan,
+⬆ output tag / pink, ``direction`` field). External command / env /
+path references (``git-index#command:...``) become terminal-styled
+``external_cli`` nodes — cleaned ``$> git diff --cached`` canvas labels
+with the full command preserved in ``full_command`` for the drawer.
+Standalone L1 documents are corralled under one compound
+container node (``group_blueprints``) so the dashboard renders them
+inside a single dashed enclosure (Cytoscape parent/compound node,
+emitted before children).
 
 ### Web Dashboard Server (`server.py`)
 

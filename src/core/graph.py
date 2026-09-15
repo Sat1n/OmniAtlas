@@ -3,11 +3,16 @@
 Builds a directed project graph from the three BLUEPRINT zoom levels:
 
 * **Lineage edges** — YAML frontmatter ``inputs`` / ``outputs`` link L1/L2
-  documents into the global Data Lineage Graph (BLUEPRINT §2).
-* **Anchor edges** — symbol-level anchors (BLUEPRINT §3) link documents
-  to the L3 classes / functions / variables they describe.
+  documents into the global Data Lineage Graph (BLUEPRINT §2). Unresolved
+  endpoints are modeled as ``io_node`` data placeholders carrying a
+  ``direction`` (``input`` / ``output``).
+* **Anchor edges** — symbol-level anchors (BLUEPRINT §3) are re-routed
+  through intermediate ``*.py`` file nodes (doc ➔ file ➔ symbol) so
+  L3 symbols never fan out directly from the L2 module hub.
 * **Source edges** — ``@source`` machine tags (BLUEPRINT §5) link L3
-  symbols to their upstream dependencies.
+  symbols to their upstream dependencies. External command / env / path
+  references become terminal-styled ``external_cli`` nodes with cleaned
+  ``$> ...`` labels and the full command kept in ``full_command``.
 
 Node statuses overlay the live Git state captured by
 :meth:`core.git_provider.GitProvider.collect_modified_files`:
@@ -16,6 +21,11 @@ Node statuses overlay the live Git state captured by
 * ``MODIFIED`` — the file backing this node carries uncommitted changes.
 * ``STALE``    — a document whose referenced code changed without a
   synchronized documentation update (Fatal Sync Enforcement, AGENTS.md §5).
+
+Standalone L1 documents (root ``AGENTS.md`` / ``BLUEPRINT.md`` /
+``README.md``) are additionally corralled under a single compound
+container node (``group_blueprints``) so the dashboard renders them
+inside one shared dashed enclosure (Cytoscape parent/compound node).
 """
 
 import json
@@ -30,6 +40,10 @@ NODE_PASS = "PASS"
 NODE_MODIFIED = "MODIFIED"
 NODE_STALE = "STALE"
 
+#: Compound container that corrals standalone L1 blueprint / doc nodes.
+BLUEPRINT_GROUP_ID = "group_blueprints"
+BLUEPRINT_GROUP_LABEL = "Blueprint & Top Docs"
+
 #: Internal ``@source`` reference: ``some/path.py#class:Name``.
 _SOURCE_REF_RE = re.compile(
     r"(?P<path>[^()\s]+\.py)"
@@ -37,8 +51,21 @@ _SOURCE_REF_RE = re.compile(
     r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)"
 )
 
-#: Drawer snippets are capped so the JSON payload stays light.
-_SNIPPET_LIMIT = 600
+#: External command / environment / filesystem reference, optionally
+#: prefixed by the tag's left-hand name (``stdout:`` / ``code_files:``):
+#: ``git-index#command:diff --cached --name-only``.
+_CLI_REF_RE = re.compile(
+    r"(?P<name>[A-Za-z0-9][\w-]*)"
+    r"#(?P<proto>command|var|path)\s*:\s*"
+    r"(?P<body>.+)"
+)
+
+#: Protocol prefixes stripped from fallback external labels.
+_EXTERN_PREFIX_RE = re.compile(r"^[A-Za-z_][\w]*\s*:\s*")
+
+#: Drawer snippets are capped so the JSON payload stays light; block-safe
+#: cutting (MarkdownDoc.excerpt) may land slightly below this ceiling.
+_SNIPPET_LIMIT = 1400
 
 
 class TopologyGraphBuilder:
@@ -74,20 +101,25 @@ class TopologyGraphBuilder:
             self._add_anchor_edges(doc, parsed[doc])
         self._add_source_edges()
         self._overlay_statuses()
+        self._add_blueprint_group()
         return self
 
     def to_dict(self) -> dict[str, Any]:
         """Export the graph in Cytoscape.js element format.
 
+        Compound container nodes are emitted before their children so a
+        parent is always defined before the nodes referencing it.
+
         @shape return: dict(nodes=[{data}], edges=[{data}])
         """
+        nodes = self._ordered_nodes()
         return {
             "meta": {
                 "root": str(self._root),
-                "node_count": len(self._nodes),
+                "node_count": len(nodes),
                 "edge_count": len(self._edges),
             },
-            "nodes": [{"data": node} for node in self._nodes.values()],
+            "nodes": [{"data": node} for node in nodes],
             "edges": [
                 {
                     "data": {
@@ -123,7 +155,7 @@ class TopologyGraphBuilder:
             path=doc,
             meta={
                 "frontmatter": frontmatter,
-                "excerpt": parsed.body.strip()[:_SNIPPET_LIMIT],
+                "excerpt": parsed.excerpt(_SNIPPET_LIMIT),
             },
         )
         doc_id = frontmatter.get("id")
@@ -134,20 +166,47 @@ class TopologyGraphBuilder:
         """Wire frontmatter inputs/outputs into the Data Lineage Graph."""
         frontmatter = parsed.frontmatter
         for upstream in self._as_list(frontmatter.get("inputs")):
-            self._add_edge(self._lineage_endpoint(upstream), doc, "lineage")
+            endpoint = self._lineage_endpoint(upstream, direction="input")
+            self._add_edge(endpoint, doc, "lineage")
         for downstream in self._as_list(frontmatter.get("outputs")):
-            self._add_edge(doc, self._lineage_endpoint(downstream), "lineage")
+            endpoint = self._lineage_endpoint(downstream, direction="output")
+            self._add_edge(doc, endpoint, "lineage")
 
-    def _lineage_endpoint(self, ref: str) -> str:
-        """Resolve a lineage id to a doc node, or mint an external node."""
+    def _lineage_endpoint(self, ref: str, direction: str) -> str:
+        """Resolve a lineage id to a doc node, or mint an io data node.
+
+        Unresolved references become ``io_node`` placeholders stamped
+        with their flow ``direction`` so the dashboard can render them
+        as shape- and color-coded markers (⬇ input rhomboid / cyan,
+        ⬆ output tag / pink).
+
+        @shape ref: str (frontmatter inputs/outputs id)
+        @shape return: str (node id)
+        @source frontmatter: src/core/parser.py#function:_split_frontmatter
+        """
         if ref in self._id_map:
             return self._id_map[ref]
-        node_id = f"ext:{ref}"
-        self._add_node(node_id, label=ref, kind="external", path=None, meta={})
+        node_id = f"io:{ref}"
+        self._add_node(
+            node_id,
+            label=ref,
+            kind="io_node",
+            path=None,
+            meta={},
+            direction=direction,
+        )
         return node_id
 
     def _add_anchor_edges(self, doc: str, parsed: Any) -> None:
-        """Link the document to every AST-verified symbol anchor."""
+        """Route anchors through file nodes: doc ➔ ``*.py`` ➔ symbol.
+
+        Inserting the intermediate L2 file node decouples the module hub
+        from its leaf symbols, turning the direct doc-to-symbol
+        "sunflower" fan-out into a readable two-level flow.
+
+        @shape parsed: MarkdownDoc (anchors verified against the AST)
+        @source anchors: src/core/parser.py#class:MarkdownParser
+        """
         for anchor in parsed.anchors:
             symbol_id = (
                 f"{anchor.file_path}#{anchor.symbol_type}:{anchor.symbol_name}"
@@ -172,7 +231,25 @@ class TopologyGraphBuilder:
                     path=anchor.file_path,
                     meta=meta,
                 )
-            self._add_edge(doc, symbol_id, "anchor")
+            file_id = self._ensure_file_node(anchor.file_path)
+            self._add_edge(doc, file_id, "anchor")
+            self._add_edge(file_id, symbol_id, "contains")
+
+    def _ensure_file_node(self, file_path: str) -> str:
+        """Return the L2 file node id for ``file_path``, minting it if new.
+
+        @shape return: str (node id, equal to the relative file path)
+        @source callers: src/core/graph.py#function:_add_anchor_edges
+        """
+        if file_path not in self._nodes:
+            self._add_node(
+                file_path,
+                label=Path(file_path).name,
+                kind="file",
+                path=file_path,
+                meta={},
+            )
+        return file_path
 
     def _add_source_edges(self) -> None:
         """Wire ``@source`` machine tags between L3 symbols."""
@@ -187,8 +264,10 @@ class TopologyGraphBuilder:
 
         Internal references (``path.py#type:name``) are tried as-is and
         with a ``src/`` prefix (docstrings may use either convention).
-        Anything else (e.g. ``git-index#command:...``) becomes an
-        external data-source node.
+        External command / environment references become terminal-styled
+        ``external_cli`` nodes (label cleaned to ``$> git diff --cached``
+        form, full command preserved for the drawer); anything else is a
+        generic external data-source node.
 
         @shape return: str | None (node id)
         """
@@ -221,13 +300,87 @@ class TopologyGraphBuilder:
                                 ],
                             },
                         )
+                        self._add_edge(
+                            self._ensure_file_node(path), symbol_id, "contains"
+                        )
                         return symbol_id
             return None
 
-        key = source.strip()[:80]
-        node_id = f"ext:{key}"
-        self._add_node(node_id, label=key, kind="external", path=None, meta={})
+        cli_match = _CLI_REF_RE.search(source)
+        if cli_match:
+            node_id = (
+                f"ext:{cli_match.group('name')}#{cli_match.group('proto')}:"
+                f"{' '.join(cli_match.group('body').split())}"
+            )
+        else:
+            stripped = _EXTERN_PREFIX_RE.sub("", source.strip())
+            node_id = f"ext:{stripped[:80] or source.strip()[:80]}"
+        cli = self._external_cli_payload(source)
+        if cli:
+            self._add_node(
+                node_id,
+                label=cli["label"],
+                kind="external_cli",
+                path=None,
+                meta={},
+            )
+            node = self._nodes[node_id]
+            node["full_label"] = cli["full_label"]
+            node["full_command"] = cli["full_command"]
+            node["cli_proto"] = cli["proto"]
+        else:
+            key = _EXTERN_PREFIX_RE.sub("", source.strip())[:80] or source.strip()[:80]
+            self._add_node(node_id, label=key, kind="external", path=None, meta={})
         return node_id
+
+    def _external_cli_payload(self, source: str) -> dict[str, str] | None:
+        """Format an external command/env/path reference for the canvas.
+
+        ``stdout: git-index#command:diff --cached --name-only`` becomes
+        the short label ``$> git diff --cached`` while the complete
+        command survives in ``full_command`` / ``full_label`` for the
+        drawer and tooltip. Refs differing only in their tag left-hand
+        name (``stdout:`` vs ``code_files:``) collapse onto one node.
+
+        @shape return: dict | None (label, full_label, full_command, proto)
+        @source regex: src/core/graph.py#var:_CLI_REF_RE
+        """
+        match = _CLI_REF_RE.search(source)
+        if not match:
+            return None
+        name = match.group("name")
+        proto = match.group("proto")
+        body = " ".join(match.group("body").split())
+        short = re.split(r"[-_]", name, maxsplit=1)[0]
+        if proto == "command":
+            tokens = body.split()
+            if not tokens:
+                return None
+            return {
+                "label": f"$> {short} {' '.join(tokens[:2])}",
+                "full_label": f"$> {short} {' '.join(tokens)}",
+                "full_command": f"{short} {' '.join(tokens)}",
+                "proto": "command",
+            }
+        if proto == "var":
+            variables = [v.strip() for v in body.split("|") if v.strip()]
+            if not variables:
+                return None
+            return {
+                "label": f"${variables[0]}" + ("…" if len(variables) > 1 else ""),
+                "full_label": " ".join(f"${v}" for v in variables),
+                "full_command": " ".join(variables),
+                "proto": "var",
+            }
+        if proto == "path":
+            target = body.split()[0] if body.split() else body
+            return {
+                "label": f"⌂ {target}",
+                "full_label": f"⌂ {body}",
+                "full_command": target,
+                "proto": "path",
+            }
+        return None
 
     def _overlay_statuses(self) -> None:
         """Stamp PASS / MODIFIED / STALE onto every node from the Git state."""
@@ -243,7 +396,7 @@ class TopologyGraphBuilder:
             node["status"] = NODE_PASS
             path = node.get("path")
             kind = node["kind"]
-            if kind == "external":
+            if kind in ("external", "external_cli", "io_node"):
                 continue
             if node.get("meta", {}).get("broken"):
                 node["status"] = NODE_STALE
@@ -263,6 +416,38 @@ class TopologyGraphBuilder:
     # Low-level helpers
     # ------------------------------------------------------------------ #
 
+    def _add_blueprint_group(self) -> None:
+        """Corral standalone L1 documents into one compound container.
+
+        Root-level documents (``AGENTS.md`` / ``BLUEPRINT.md`` /
+        ``README.md``) are visually grouped by a Cytoscape parent node
+        instead of floating as orphans on the canvas.
+
+        @shape return: None (mutates self._nodes in place)
+        @source levels: src/core/graph.py#function:_add_doc_node
+        """
+        members = [
+            node for node in self._nodes.values() if node["kind"] == "l1_doc"
+        ]
+        if not members:
+            return
+        self._nodes[BLUEPRINT_GROUP_ID] = {
+            "id": BLUEPRINT_GROUP_ID,
+            "label": BLUEPRINT_GROUP_LABEL,
+            "kind": "group",
+            "status": NODE_PASS,
+            "path": None,
+            "meta": {"members": len(members)},
+        }
+        for node in members:
+            node["parent"] = BLUEPRINT_GROUP_ID
+
+    def _ordered_nodes(self) -> list[dict[str, Any]]:
+        """Return nodes with compound containers first (parent-before-child)."""
+        groups = [n for n in self._nodes.values() if n["kind"] == "group"]
+        singles = [n for n in self._nodes.values() if n["kind"] != "group"]
+        return groups + singles
+
     def _add_node(
         self,
         node_id: str,
@@ -271,10 +456,11 @@ class TopologyGraphBuilder:
         kind: str,
         path: str | None,
         meta: dict[str, Any],
+        direction: str | None = None,
     ) -> None:
         if node_id in self._nodes:
             return
-        self._nodes[node_id] = {
+        node = {
             "id": node_id,
             "label": label,
             "kind": kind,
@@ -282,6 +468,9 @@ class TopologyGraphBuilder:
             "path": path,
             "meta": meta,
         }
+        if direction is not None:
+            node["direction"] = direction
+        self._nodes[node_id] = node
 
     def _add_edge(self, source: str, target: str, kind: str) -> None:
         if source == target:

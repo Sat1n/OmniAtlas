@@ -78,6 +78,50 @@ class MarkdownDoc:
         """
         return len(_CJK_RE.findall(self.body)) + len(_WORD_RE.findall(self.body))
 
+    def excerpt(self, limit: int = 600) -> str:
+        """Return a syntax-safe prefix of the document body.
+
+        Cutting is block-aware (BLUEPRINT §4 spirit — never corrupt
+        structure): the slice always ends on a complete line, pipe
+        tables are kept structurally intact (header + separator row
+        never split), and an unterminated fenced code block is closed
+        again so downstream renderers never see broken syntax.
+
+        @shape limit: int (maximum characters)
+        @shape return: str (markdown-safe excerpt)
+        @source body: src/core/parser.py#class:MarkdownParser
+        """
+        text = self.body.strip()
+        if len(text) <= limit:
+            return text
+
+        kept: list[str] = []
+        used = 0
+        for block in _split_blocks(text.splitlines()):
+            block_size = sum(len(line) + 1 for line in block)
+            if used + block_size <= limit:
+                kept.extend(block)
+                used += block_size
+                continue
+            if not kept:
+                # Pathological case: even the first block is oversized.
+                kept = _fit_first_block(block, limit)
+                break
+            if block[0].lstrip().startswith(("```", "~~~", "|")):
+                break  # never split a table / fence mid-block
+            for line in block:  # paragraph: fill complete lines only
+                if used + len(line) + 1 > limit:
+                    break
+                kept.append(line)
+                used += len(line) + 1
+            break
+
+        if kept:
+            return "\n".join(kept).rstrip()
+        if text.startswith("|"):
+            return ""  # cutting a giant single table would break syntax
+        return text[:limit].rsplit(" ", 1)[0].rstrip()
+
 
 @dataclass
 class SymbolLookup:
@@ -205,6 +249,76 @@ class PythonASTParser:
             and name.text is not None
             and name.text.decode("utf-8") == symbol_name
         )
+
+
+def _split_blocks(lines: list[str]) -> list[list[str]]:
+    """Group consecutive lines into Markdown blocks.
+
+    Fenced code blocks and pipe tables stay together as one unit so
+    excerpting never cuts them mid-syntax; blank lines and paragraphs
+    form their own blocks.
+
+    @shape lines: list[str] (markdown body lines)
+    @shape return: list[list[str]] (blocks of consecutive lines)
+    """
+    blocks: list[list[str]] = []
+    i = 0
+    total = len(lines)
+    while i < total:
+        stripped = lines[i].lstrip()
+        if stripped.startswith(("```", "~~~")):
+            fence = stripped[:3]
+            j = i + 1
+            while j < total and not lines[j].lstrip().startswith(fence):
+                j += 1
+            if j < total:
+                j += 1
+            blocks.append(lines[i:j])
+            i = j
+        elif stripped.startswith("|"):
+            j = i
+            while j < total and lines[j].lstrip().startswith("|"):
+                j += 1
+            blocks.append(lines[i:j])
+            i = j
+        elif stripped == "":
+            blocks.append([lines[i]])
+            i += 1
+        else:
+            j = i
+            while j < total and lines[j].strip() and not lines[j].lstrip().startswith(("|", "```", "~~~")):
+                j += 1
+            blocks.append(lines[i:j])
+            i = j
+    return blocks
+
+
+def _fit_first_block(block: list[str], limit: int) -> list[str]:
+    """Whole-line prefix of an oversized first block.
+
+    Tables keep at least their header + separator row (or nothing) and
+    code fences are re-closed, so the result is always valid Markdown.
+
+    @shape block: list[str] (lines of the first block)
+    @shape return: list[str] (lines that fit, syntax intact)
+    """
+    kept: list[str] = []
+    used = 0
+    for line in block:
+        if used + len(line) + 1 > limit - 4:  # reserve a closing fence
+            break
+        kept.append(line)
+        used += len(line) + 1
+    first = block[0].lstrip()
+    if first.startswith(("```", "~~~")):
+        if not kept:
+            kept.append(first[:3])
+        if not kept[-1].lstrip().startswith(("```", "~~~")):
+            kept.append(first[:3])
+    elif first.startswith("|") and 0 < len(kept) < 2:
+        # A lone table header without its separator breaks the syntax.
+        kept = []
+    return kept
 
 
 def _strip_code_regions(text: str) -> str:

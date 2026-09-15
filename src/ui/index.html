@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OmniAtlas · Topology Dashboard</title>
+<script src="vendor/cytoscape.min.js"></script>
+<script src="vendor/marked.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #1a2129;
+    --panel-border: #2c3a47;
+    --text: #dfe6e9;
+    --text-dim: #8395a7;
+    --pass: #2ecc71;
+    --modified: #f1c40f;
+    --stale: #e74c3c;
+    --external: #7f8fa6;
+    --accent: #00cec9;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", "Noto Sans", "PingFang SC", sans-serif;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 10px 18px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--panel-border);
+    z-index: 5;
+  }
+  header h1 { font-size: 15px; font-weight: 600; letter-spacing: .4px; }
+  header h1 span { color: var(--accent); }
+  .stat {
+    font-size: 12px;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .stat .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .stat b { color: var(--text); font-variant-numeric: tabular-nums; }
+  header .spacer { flex: 1; }
+  #refresh {
+    background: transparent;
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    font-size: 12px;
+    padding: 5px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  #refresh:hover { border-color: var(--accent); color: var(--accent); }
+
+  #stage { position: relative; flex: 1; min-height: 0; }
+  #cy { position: absolute; inset: 0; }
+
+  #legend {
+    position: absolute;
+    left: 14px;
+    top: 14px;
+    background: rgba(26, 33, 41, .68);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 14px 18px;
+    font-size: 14px;
+    line-height: 2.1;
+    color: var(--text);
+    z-index: 4;
+    pointer-events: none;
+  }
+  #legend .row { display: flex; align-items: center; gap: 11px; }
+  #legend .swatch { width: 20px; height: 20px; flex: none; }
+  #legend .swatch-svg { flex: none; display: block; }
+  #legend .circle { border-radius: 50%; }
+  #legend .rect { border-radius: 3px; }
+  #legend .diamond { transform: rotate(45deg) scale(.8); }
+  #legend .hex { clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); }
+  #legend .rhomboid { transform: skewX(-18deg); }
+  #legend .group-title {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--accent);
+    font-weight: 600;
+    margin: 2px 0 4px;
+  }
+  #legend hr { border: none; border-top: 1px solid var(--panel-border); margin: 8px 0; }
+
+  #banner {
+    position: absolute;
+    left: 50%;
+    top: 16px;
+    transform: translateX(-50%);
+    background: rgba(231, 76, 60, .15);
+    border: 1px solid var(--stale);
+    color: var(--stale);
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    display: none;
+    z-index: 6;
+  }
+
+  #drawer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 340px;
+    height: 100%;
+    background: var(--panel);
+    border-left: 1px solid var(--panel-border);
+    transform: translateX(100%);
+    transition: transform .18s ease-out;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+  }
+  #drawer.open { transform: translateX(0); }
+  #drawer .head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--panel-border);
+  }
+  #drawer .head h2 { font-size: 15px; word-break: break-all; }
+  #drawer .close {
+    background: none; border: none; color: var(--text-dim);
+    font-size: 18px; cursor: pointer; line-height: 1; padding: 2px 4px;
+  }
+  #drawer .close:hover { color: var(--text); }
+  #drawer .body { padding: 12px 16px; overflow-y: auto; flex: 1; font-size: 12.5px; }
+  .badges { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+  .badge {
+    font-size: 10.5px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--panel-border);
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: .6px;
+  }
+  .badge.status-PASS { color: var(--pass); border-color: var(--pass); }
+  .badge.status-MODIFIED { color: var(--modified); border-color: var(--modified); }
+  .badge.status-STALE { color: var(--stale); border-color: var(--stale); }
+  .field { margin-bottom: 12px; }
+  .field .k {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: .8px;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+  }
+  .field .v { word-break: break-all; line-height: 1.55; }
+  pre.snippet {
+    background: var(--bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    padding: 10px;
+    font-family: "JetBrains Mono", Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 220px;
+    overflow-y: auto;
+    color: #b2bec3;
+  }
+  ul.tags { list-style: none; }
+  ul.tags li {
+    background: var(--bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 5px;
+    padding: 5px 8px;
+    margin-bottom: 5px;
+    font-family: Consolas, monospace;
+    font-size: 11px;
+    word-break: break-all;
+  }
+  .md { line-height: 1.6; font-size: 12.5px; }
+  .md h1, .md h2, .md h3, .md h4 {
+    font-size: 13px;
+    margin: 12px 0 6px;
+    color: var(--text);
+  }
+  .md h1 { border-bottom: 1px solid var(--panel-border); padding-bottom: 4px; }
+  .md h2 { border-bottom: 1px dotted var(--panel-border); padding-bottom: 3px; }
+  .md p { margin: 6px 0; }
+  .md ul, .md ol { margin: 6px 0 6px 20px; }
+  .md li { margin: 2px 0; }
+  .md table {
+    border-collapse: collapse;
+    margin: 8px 0;
+    font-size: 11.5px;
+    width: 100%;
+    display: block;
+    overflow-x: auto;
+  }
+  .md th, .md td {
+    border: 1px solid var(--panel-border);
+    padding: 4px 9px;
+    text-align: left;
+    vertical-align: top;
+  }
+  .md th { background: var(--bg); color: var(--accent); white-space: nowrap; }
+  .md code {
+    background: var(--bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-family: "JetBrains Mono", Consolas, monospace;
+    font-size: 11px;
+  }
+  .md pre {
+    background: var(--bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    padding: 10px;
+    overflow-x: auto;
+    font-size: 11px;
+    line-height: 1.55;
+  }
+  .md pre code { background: none; border: none; padding: 0; }
+  .md a { color: var(--accent); }
+  .md blockquote {
+    border-left: 3px solid var(--panel-border);
+    padding-left: 10px;
+    color: var(--text-dim);
+    margin: 6px 0;
+  }
+  .cli-cmd { display: flex; align-items: flex-start; gap: 8px; }
+  code.language-bash {
+    flex: 1;
+    display: block;
+    background: #1e1e2e;
+    border: 1px solid #a6e3a1;
+    border-radius: 6px;
+    color: #a6e3a1;
+    padding: 8px 10px;
+    font-family: "JetBrains Mono", Consolas, monospace;
+    font-size: 11.5px;
+    line-height: 1.55;
+    word-break: break-all;
+    white-space: pre-wrap;
+  }
+  .copy-btn {
+    flex: none;
+    background: transparent;
+    border: 1px solid var(--panel-border);
+    color: var(--text-dim);
+    font-size: 10.5px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .copy-btn:hover { border-color: #a6e3a1; color: #a6e3a1; }
+  #hint {
+    position: absolute;
+    right: 14px;
+    bottom: 12px;
+    font-size: 11px;
+    color: var(--text-dim);
+    background: rgba(26, 33, 41, .85);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    z-index: 4;
+    pointer-events: none;
+  }
+
+  #tooltip {
+    position: absolute;
+    display: none;
+    max-width: 340px;
+    background: rgba(26, 33, 41, .96);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-family: "JetBrains Mono", Consolas, monospace;
+    font-size: 11.5px;
+    line-height: 1.5;
+    word-break: break-all;
+    color: var(--text);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .45);
+    z-index: 7;
+    pointer-events: none;
+  }
+  #tooltip .tt-path { color: var(--text-dim); font-size: 10.5px; margin-top: 2px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>OmniAtlas <span>· Topology Dashboard</span></h1>
+  <div class="stat"><span class="dot" style="background:var(--pass)"></span>PASS <b id="n-pass">0</b></div>
+  <div class="stat"><span class="dot" style="background:var(--modified)"></span>MODIFIED <b id="n-mod">0</b></div>
+  <div class="stat"><span class="dot" style="background:var(--stale)"></span>STALE <b id="n-stale">0</b></div>
+  <div class="stat">nodes <b id="n-nodes">0</b> · edges <b id="n-edges">0</b></div>
+  <div class="spacer"></div>
+  <button id="refresh" title="Re-fetch /api/topology and re-layout">↻ Refresh</button>
+</header>
+
+<div id="stage">
+  <div id="cy"></div>
+
+  <div id="legend">
+    <div class="group-title">Node Types</div>
+    <div class="row"><span class="swatch rect" style="background:var(--external); border:2px solid #e8edf2"></span> L1 Blueprint</div>
+    <div class="row"><span class="swatch hex" style="background:var(--external)"></span> L2 Module</div>
+    <div class="row"><svg class="swatch-svg" width="26" height="18" viewBox="0 0 26 18"><path d="M1,16.1 L1,1.9 Q2.3,1 7.5,1 L18.5,1 Q23.7,1 25,1.9 L25,16.1 Q23.7,17 18.5,17 L7.5,17 Q2.3,17 1,16.1 Z" fill="#7f8fa6"/></svg> L2 File</div>
+    <div class="row"><span class="swatch circle" style="background:var(--external)"></span> L3 Class</div>
+    <div class="row"><span class="swatch diamond" style="background:var(--external)"></span> L3 Function / Var</div>
+    <div class="row"><span class="swatch rhomboid" style="background:#89dceb"></span> ⬇ Input Node</div>
+    <div class="row"><svg class="swatch-svg" width="22" height="18" viewBox="0 0 22 18"><polygon points="2,2 14,2 20,9 14,16 2,16" fill="#f5c2e7"/></svg> ⬆ Output Node</div>
+    <div class="row"><svg class="swatch-svg" width="22" height="18" viewBox="0 0 22 18"><polygon points="2,2 14,2 20,9 14,16 2,16" fill="#1e1e2e" stroke="#a6e3a1" stroke-width="1.5"/></svg> $&gt; CLI / Env Command</div>
+    <div class="row"><span class="swatch rect" style="background:rgba(178,190,195,.12); border:1px dashed #313244"></span> Top Docs Group</div>
+    <hr>
+    <div class="group-title">Sync Status</div>
+    <div class="row"><span class="swatch circle" style="background:var(--pass)"></span> PASS — untouched</div>
+    <div class="row"><span class="swatch circle" style="background:var(--modified)"></span> MODIFIED — uncommitted</div>
+    <div class="row"><span class="swatch circle" style="background:var(--stale)"></span> STALE — doc diverged</div>
+  </div>
+
+  <div id="banner"></div>
+  <div id="tooltip"></div>
+  <div id="hint">Click a node → blast-radius highlight · Click background → reset</div>
+
+  <aside id="drawer">
+    <div class="head">
+      <h2 id="drawer-title">—</h2>
+      <button class="close" id="drawer-close" title="Close">✕</button>
+    </div>
+    <div class="body" id="drawer-body"></div>
+  </aside>
+</div>
+
+<script>
+"use strict";
+
+const STATUS_COLOR = {
+  PASS: "#2ecc71",
+  MODIFIED: "#f1c40f",
+  STALE: "#e74c3c",
+};
+const NON_COUNTED = new Set(["external", "external_cli", "group", "io_node"]);
+
+const EXTERNAL_COLOR = "#57606f";
+const IO_IN_COLOR = "#89dceb";
+const IO_OUT_COLOR = "#f5c2e7";
+const CLI_BG = "#1e1e2e";
+const CLI_ACCENT = "#a6e3a1";
+const KIND_SHAPE = {
+  l1_doc: "roundrectangle",
+  l2_doc: "hexagon",
+  file: "barrel",
+  class: "ellipse",
+  function: "diamond",
+  var: "diamond",
+  external: "cut-rectangle",
+  external_cli: "round-tag",
+  group: "roundrectangle",
+};
+
+const MAX_LABEL_LEN = 18;
+
+function truncateLabel(text) {
+  const s = String(text ?? "");
+  return s.length > MAX_LABEL_LEN ? s.slice(0, MAX_LABEL_LEN - 3) + "..." : s;
+}
+
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => (
+  { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+));
+
+let cy = null;
+let dashPhase = 0;
+
+const CY_STYLE = [
+  {
+    selector: "node",
+    style: {
+      "background-color": (el) => {
+        const kind = el.data("kind");
+        if (kind === "external") return EXTERNAL_COLOR;
+        if (kind === "external_cli") return CLI_BG;
+        if (kind === "io_node")
+          return el.data("direction") === "output" ? IO_OUT_COLOR : IO_IN_COLOR;
+        return STATUS_COLOR[el.data("status")] || STATUS_COLOR.PASS;
+      },
+      shape: (el) => {
+        if (el.data("kind") === "io_node")
+          return el.data("direction") === "output" ? "tag" : "rhomboid";
+        return KIND_SHAPE[el.data("kind")] || "ellipse";
+      },
+      label: "data(label)",
+      color: "#cfd8dc",
+      "font-size": 9,
+      "text-valign": "bottom",
+      "text-margin-y": 5,
+      "text-wrap": "wrap",
+      "text-max-width": "95px",
+      width: 30,
+      height: 30,
+      "border-width": 1,
+      "border-color": "#0f1419",
+      "overlay-padding": "4px",
+    },
+  },
+  {
+    selector: "node[kind = 'l1_doc']",
+    style: { width: 48, height: 32, "border-width": 2.5, "border-color": "#e8edf2" },
+  },
+  {
+    selector: "node[kind = 'l2_doc']",
+    style: { width: 56, height: 56, "font-size": 10 },
+  },
+  {
+    selector: "node[kind = 'file']",
+    style: { width: 44, height: 30, "font-size": 8.5 },
+  },
+  {
+    selector: "node[kind = 'io_node']",
+    style: { width: 46, height: 28, "font-size": 8.5, opacity: 0.95 },
+  },
+  {
+    selector: "node[kind = 'io_node'][direction = 'input']",
+    style: { "background-color": IO_IN_COLOR, "border-color": IO_IN_COLOR },
+  },
+  {
+    selector: "node[kind = 'io_node'][direction = 'output']",
+    style: { "background-color": IO_OUT_COLOR, "border-color": IO_OUT_COLOR },
+  },
+  {
+    selector: "node:parent",
+    style: {
+      "background-color": "#b2bec3",
+      "background-opacity": 0.06,
+      "border-width": 1.5,
+      "border-style": "dashed",
+      "border-color": "#313244",
+      padding: "16px",
+      "padding-relative-to": "average",
+      label: "data(label)",
+      color: "#8395a7",
+      "font-size": 11,
+      "font-weight": 600,
+      "text-valign": "top",
+      "text-halign": "left",
+      "text-margin-x": 8,
+      "text-margin-y": 8,
+    },
+  },
+  {
+    selector: "node[kind = 'external']",
+    style: { "font-size": 8, "border-color": "#2c3a47", opacity: 0.9, width: 26, height: 22 },
+  },
+  {
+    selector: "node[kind = 'external_cli']",
+    style: {
+      "background-color": CLI_BG,
+      "border-width": 1.5,
+      "border-color": CLI_ACCENT,
+      color: CLI_ACCENT,
+      "font-family": "JetBrains Mono, Consolas, monospace",
+      "font-size": 8.5,
+      width: 52,
+      height: 28,
+    },
+  },
+  {
+    selector: "edge",
+    style: {
+      width: 1.4,
+      "line-color": "#4a5a68",
+      "target-arrow-color": "#4a5a68",
+      "target-arrow-shape": "triangle",
+      "arrow-scale": 0.8,
+      "curve-style": "bezier",
+      opacity: 0.75,
+    },
+  },
+  {
+    selector: "edge[kind = 'lineage']",
+    style: {
+      "target-arrow-shape": "triangle",
+      "arrow-scale": 1.1,
+      "line-style": "dashed",
+      "line-dash-pattern": [7, 5],
+      width: 2,
+    },
+  },
+  {
+    selector: "edge[kind = 'lineage'].flow-in",
+    style: { "line-color": IO_IN_COLOR, "target-arrow-color": IO_IN_COLOR },
+  },
+  {
+    selector: "edge[kind = 'lineage'].flow-out",
+    style: { "line-color": IO_OUT_COLOR, "target-arrow-color": IO_OUT_COLOR },
+  },
+  {
+    selector: "edge[kind = 'anchor']",
+    style: { "line-color": "#7f8fa6", "target-arrow-color": "#7f8fa6" },
+  },
+  {
+    selector: "edge[kind = 'contains']",
+    style: { "line-color": "#45525f", "target-arrow-color": "#45525f", "line-style": "solid", width: 1.4 },
+  },
+  {
+    selector: "edge[kind = 'source']",
+    style: { "line-color": "#6c5ce7", "target-arrow-color": "#6c5ce7", "line-style": "dashed" },
+  },
+  { selector: ".faded", style: { opacity: 0.12 } },
+  {
+    selector: ".highlight",
+    style: { "border-width": 3, "border-color": "#ffffff", "z-index": 10 },
+  },
+  {
+    selector: "edge.highlight",
+    style: { width: 2.8, opacity: 1, "z-index": 10, "line-color": "#00cec9", "target-arrow-color": "#00cec9" },
+  },
+];
+
+async function loadGraph() {
+  const banner = document.getElementById("banner");
+  banner.style.display = "none";
+  try {
+    const res = await fetch("/api/topology", { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    render(data);
+  } catch (err) {
+    banner.textContent = `Failed to load topology: ${err.message}`;
+    banner.style.display = "block";
+  }
+}
+
+function render(data) {
+  const container = document.getElementById("cy");
+  const tooltip = document.getElementById("tooltip");
+  tooltip.style.display = "none";
+  if (cy) { cy.destroy(); cy = null; }
+
+  data.nodes.forEach((n) => {
+    const d = n.data;
+    const raw = String(d.label ?? "");
+    d.full_label = d.full_label || raw;
+    d.label = d.kind === "external_cli" ? raw : truncateLabel(d.full_label);
+  });
+
+  cy = cytoscape({
+    container,
+    elements: [...data.nodes, ...data.edges],
+    style: CY_STYLE,
+    wheelSensitivity: 0.25,
+    layout: {
+      name: "cose",
+      animate: false,
+      nodeRepulsion: 260000,
+      idealEdgeLength: 100,
+      edgeElasticity: 110,
+      nodeOverlap: 14,
+      componentSpacing: 80,
+      nestingFactor: 2.4,
+      gravity: 0.25,
+      padding: 56,
+    },
+  });
+
+  const counts = { PASS: 0, MODIFIED: 0, STALE: 0 };
+  data.nodes.forEach((n) => {
+    if (!NON_COUNTED.has(n.data.kind))
+      counts[n.data.status] = (counts[n.data.status] || 0) + 1;
+  });
+  document.getElementById("n-pass").textContent = counts.PASS;
+  document.getElementById("n-mod").textContent = counts.MODIFIED;
+  document.getElementById("n-stale").textContent = counts.STALE;
+  document.getElementById("n-nodes").textContent =
+    data.nodes.filter((n) => !NON_COUNTED.has(n.data.kind)).length;
+  document.getElementById("n-edges").textContent = data.edges.length;
+
+  cy.on("tap", "node", (evt) => selectNode(evt.target));
+  cy.on("tap", (evt) => { if (evt.target === cy) resetHighlight(); });
+
+  cy.edges('[kind = "lineage"]').forEach((e) => {
+    e.addClass(e.source().data("kind") === "io_node" ? "flow-in" : "flow-out");
+  });
+
+  cy.on("mouseover", "node", (evt) => {
+    const d = evt.target.data();
+    if (!d.full_label || d.full_label === d.label) return;
+    const stage = document.getElementById("stage");
+    const p = evt.renderedPosition || evt.target.renderedPosition();
+    const pathLine = d.path && d.path !== d.full_label
+      ? `<div class="tt-path">${esc(d.path)}</div>` : "";
+    tooltip.innerHTML = `${esc(d.full_label)}${pathLine}`;
+    const x = Math.min(p.x + 16, stage.clientWidth - tooltip.offsetWidth - 8);
+    const y = Math.min(p.y + 16, stage.clientHeight - tooltip.offsetHeight - 8);
+    tooltip.style.left = `${Math.max(8, x)}px`;
+    tooltip.style.top = `${Math.max(8, y)}px`;
+    tooltip.style.display = "block";
+  });
+  cy.on("mouseout", "node", () => { tooltip.style.display = "none"; });
+}
+
+function selectNode(node) {
+  cy.elements().addClass("faded");
+  const hood = node.closedNeighborhood();
+  hood.removeClass("faded").addClass("highlight");
+  openDrawer(node);
+}
+
+function resetHighlight() {
+  if (!cy) return;
+  cy.elements().removeClass("faded highlight");
+  closeDrawer();
+}
+
+function openDrawer(node) {
+  const d = node.data();
+  document.getElementById("drawer-title").textContent = d.full_label || d.label || d.id;
+  const meta = d.meta || {};
+  const parts = [];
+
+  parts.push(`<div class="badges">
+      <span class="badge">${esc(d.kind)}</span>
+      <span class="badge status-${esc(d.status)}">${esc(d.status)}</span>
+      ${meta.broken ? '<span class="badge status-STALE">broken anchor</span>' : ""}
+    </div>`);
+
+  if (d.full_label && d.full_label !== d.label)
+    parts.push(field("Full Label", esc(d.full_label)));
+
+  if (meta.members != null)
+    parts.push(field("Child Documents", `<b>${esc(meta.members)}</b>`));
+
+  if (d.direction) {
+    const isInput = d.direction === "input";
+    parts.push(field("Direction", isInput
+      ? "⬇ Input — upstream data source feeding this module"
+      : "⬆ Output — downstream consumer of this module"));
+    parts.push(field("Format", "Lineage id from YAML frontmatter "
+      + (isInput ? "inputs" : "outputs")
+      + " (BLUEPRINT §2 Data Flow Contract)"));
+    const links = node.connectedEdges().map((e) => {
+      const other = e.target().id() === d.id ? e.source() : e.target();
+      return esc(other.data().full_label || other.data().label || other.id());
+    });
+    parts.push(field("Connected Nodes", links.length ? links.join("<br>") : "—"));
+  }
+
+  if (d.kind === "external_cli") {
+    const cardTitle = d.cli_proto === "command"
+      ? "Executed Command"
+      : d.cli_proto === "var" ? "Environment Variables" : "Filesystem Path";
+    const cmd = d.full_command || d.full_label || d.label;
+    parts.push(field(cardTitle, `
+      <div class="cli-cmd">
+        <code class="language-bash">${esc(cmd)}</code>
+        <button class="copy-btn" data-cmd="${esc(cmd)}" title="Copy to clipboard">Copy</button>
+      </div>`));
+    const consumers = node.connectedEdges()
+      .filter((e) => e.data("kind") === "source" && e.source().id() === d.id)
+      .map((e) => e.target());
+    if (consumers.length) {
+      const rows = consumers.map((t) =>
+        `<li>${esc(t.data("path") || t.id())} ➔ <b>${esc(t.data("full_label") || t.data("label"))}</b></li>`);
+      parts.push(field("Dependent Symbol", `<ul class="tags">${rows.join("")}</ul>`));
+    }
+  }
+
+  if (d.path) parts.push(field("Path", esc(d.path) + (meta.line ? ` : ${esc(meta.line)}` : "")));
+
+  const fm = meta.frontmatter || {};
+  if (Object.keys(fm).length) {
+    const rows = Object.entries(fm)
+      .map(([k, v]) => `${esc(k)}: ${esc(Array.isArray(v) ? v.join(", ") : v)}`)
+      .join("\n");
+    parts.push(field("Frontmatter (YAML)", `<pre class="snippet">${rows}</pre>`));
+  }
+
+  if (meta.shapes && meta.shapes.length)
+    parts.push(field("@shape", `<ul class="tags">${meta.shapes.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>`));
+  if (meta.sources && meta.sources.length)
+    parts.push(field("@source", `<ul class="tags">${meta.sources.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>`));
+
+  if (meta.docstring) parts.push(field("Docstring", `<pre class="snippet">${esc(meta.docstring)}</pre>`));
+  if (meta.excerpt) parts.push(field("Excerpt", `<div class="md">${renderMarkdown(meta.excerpt)}</div>`));
+
+  parts.push(field("Node ID", esc(d.id)));
+
+  document.getElementById("drawer-body").innerHTML = parts.join("");
+  document.getElementById("drawer").classList.add("open");
+}
+
+function renderMarkdown(text) {
+  if (typeof marked === "undefined" || !marked.parse)
+    return `<pre class="snippet">${esc(text)}</pre>`;
+  return sanitizeHtml(marked.parse(String(text)));
+}
+
+function sanitizeHtml(html) {
+  const box = document.createElement("div");
+  box.innerHTML = html;
+  box.querySelectorAll("script, iframe, object, embed, style, link, form").forEach((el) => el.remove());
+  box.querySelectorAll("*").forEach((el) => {
+    [...el.attributes].forEach((a) => {
+      if (/^on/i.test(a.name) || (a.name === "href" && /^\s*javascript:/i.test(a.value)))
+        el.removeAttribute(a.name);
+    });
+  });
+  return box.innerHTML;
+}
+
+function field(key, html) {
+  return `<div class="field"><div class="k">${esc(key)}</div><div class="v">${html}</div></div>`;
+}
+
+function closeDrawer() {
+  document.getElementById("drawer").classList.remove("open");
+}
+
+document.getElementById("refresh").addEventListener("click", loadGraph);
+document.getElementById("drawer-close").addEventListener("click", resetHighlight);
+
+document.getElementById("drawer-body").addEventListener("click", (evt) => {
+  const btn = evt.target.closest(".copy-btn");
+  if (btn) copyToClipboard(btn.dataset.cmd || "", btn);
+});
+
+function copyToClipboard(text, btn) {
+  const done = () => {
+    btn.textContent = "✓ Copied";
+    setTimeout(() => { btn.textContent = "Copy"; }, 1200);
+  };
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+  } else {
+    fallbackCopy(text, done);
+  }
+}
+
+function fallbackCopy(text, done) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand("copy"); done(); } finally { ta.remove(); }
+}
+
+window.setInterval(() => {
+  if (!cy || cy.destroyed()) return;
+  dashPhase = (dashPhase + 11) % 12;
+  cy.edges('[kind = "lineage"]').style("line-dash-offset", dashPhase);
+}, 70);
+
+if (typeof cytoscape === "undefined") {
+  document.getElementById("banner").textContent =
+    "Cytoscape.js failed to load — check vendor/cytoscape.min.js";
+  document.getElementById("banner").style.display = "block";
+} else {
+  loadGraph();
+}
+</script>
+</body>
+</html>

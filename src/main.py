@@ -4,6 +4,8 @@ Supreme framework meta-specification: ``BLUEPRINT.md``.
 Project architecture panorama: ``AGENTS.md``.
 """
 
+import webbrowser
+
 import typer
 from rich.console import Console
 from rich.panel import Panel
@@ -13,6 +15,7 @@ from rich.text import Text
 from core.git_provider import GitProvider, StagedChanges
 from core.installer import HookInstaller, InstallResult
 from core.linter import AnchorCheck, LinterEngine, SyncCheck, TokenCheck
+from core.server import AtlasWebServer, is_headless_environment
 
 VERSION = "0.0.1"
 
@@ -116,6 +119,69 @@ def _render_install_result(result: InstallResult) -> None:
         else "OmniAtlas Git Hook Installed"
     )
     console.print(Panel(body, title=title, border_style="green"))
+
+
+@app.command()
+def ui(
+    host: str = typer.Option(
+        "127.0.0.1", "--host", "-h", help="Bind address (use 0.0.0.0 for LAN access)."
+    ),
+    port: int = typer.Option(8080, "--port", "-p", help="Listen port."),
+    no_browser: bool = typer.Option(
+        False, "--no-browser", help="Never auto-open a browser window."
+    ),
+) -> None:
+    """Launch the web topology dashboard (zero-dependency stdlib server)."""
+    server = AtlasWebServer(host=host, port=port)
+    headless = is_headless_environment()
+
+    try:
+        if headless:
+            _render_headless_panel(server.url, port)
+        else:
+            _render_local_panel(server.url, host)
+            if not no_browser:
+                webbrowser.open(server.url)
+        server.serve_forever()
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Shutting down OmniAtlas dashboard...[/yellow]")
+        raise typer.Exit(code=0)
+    except OSError as exc:
+        text = Text("✖ Error: ", style="bold red")
+        text.append(
+            f"Cannot bind {host}:{port} ({exc.strerror or exc}). "
+            "Pick another port with --port.",
+            style="red",
+        )
+        console.print(text)
+        raise typer.Exit(code=1)
+
+
+def _render_local_panel(url: str, host: str) -> None:
+    """Startup panel for desktop sessions where a browser will open."""
+    body = (
+        f"Dashboard URL: [bold cyan]{url}[/bold cyan]\n"
+        f"Bound to: [cyan]{host}[/cyan]\n\n"
+        "Click a node to inspect its blast radius and metadata.\n"
+        "Press [bold]Ctrl+C[/bold] to stop the server."
+    )
+    console.print(Panel(body, title="OmniAtlas Topology Dashboard", border_style="green"))
+
+
+def _render_headless_panel(url: str, port: int) -> None:
+    """Startup panel for SSH / Docker / display-less environments."""
+    body = (
+        "[yellow]Headless / remote environment detected — "
+        "browser auto-open skipped.[/yellow]\n\n"
+        f"Dashboard URL (on this machine): [bold cyan]{url}[/bold cyan]\n\n"
+        "From your [bold]local[/bold] workstation, forward the port:\n"
+        f"  [bold cyan]ssh -L {port}:127.0.0.1:{port} <user>@<this-host>[/bold cyan]\n"
+        f"Then open [bold cyan]http://127.0.0.1:{port}[/bold cyan] locally.\n\n"
+        "Press [bold]Ctrl+C[/bold] to stop the server."
+    )
+    console.print(
+        Panel(body, title="OmniAtlas Topology Dashboard (Remote)", border_style="yellow")
+    )
 
 
 def _render_changes(changes: StagedChanges, title: str) -> None:

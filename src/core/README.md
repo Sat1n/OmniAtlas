@@ -80,6 +80,7 @@ emitted before children).
 * Stdlib dashboard server: [AtlasWebServer](src/core/server.py#class:AtlasWebServer)
 * Headless / SSH detection: [is_headless_environment](src/core/server.py#function:is_headless_environment)
 * IDE environment detector: [detect_installed_ides](src/core/server.py#function:detect_installed_ides)
+* Remote session probe: [is_remote_session](src/core/server.py#function:is_remote_session)
 * Repository change watcher: [_RepoWatcher](src/core/server.py#class:_RepoWatcher)
 * Server-side editor launcher: [_open_in_editor](src/core/server.py#function:_open_in_editor)
 
@@ -90,10 +91,13 @@ SSH Remote URI (``ide://vscode-remote/ssh-remote+<host><path>:<line>``)
 or the local URI scheme. The SSE stream sends ``Cache-Control: no-cache``
 and ``X-Accel-Buffering: no`` (proxy buffering was the push-failure root
 cause over SSH tunnels) over HTTP/1.1 with Nagle disabled.
-``_RepoWatcher`` polls tracked ``.py`` / ``.md`` mtimes (~0.8s) and
-pushes ``graph_update`` SSE events; the browser patches the canvas
-incrementally (diff, no layout recalculation) and flashes the nodes
-whose status changed.
+``_RepoWatcher`` polls tracked ``.py`` / ``.md`` mtimes **and** the Git
+status signature (~0.8s) — commits/stage/reset change statuses without
+touching mtimes — and pushes ``graph_update`` SSE events; the browser
+patches the canvas incrementally (diff, no layout recalculation) and
+flashes the nodes whose status changed. ``/api/ides`` also reports
+``launchers`` (server-side spawnability per editor) and ``remote``
+(SSH session), driving the context-aware default jump mode.
 
 ## Data Flow
 

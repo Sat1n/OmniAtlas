@@ -133,6 +133,30 @@ def detect_installed_ides() -> list[str]:
     return found
 
 
+def is_remote_session() -> bool:
+    """True when the server process lives inside an SSH session.
+
+    Drives the dashboard's default jump mode: over Remote-SSH the
+    server-side CLI execution is the most reliable editor hand-off.
+
+    @shape return: bool
+    @source env: process-environment#var:SSH_CLIENT|SSH_TTY|SSH_CONNECTION
+    """
+    return any(key in os.environ for key in ("SSH_CLIENT", "SSH_TTY", "SSH_CONNECTION"))
+
+
+@lru_cache(maxsize=1)
+def server_launchers() -> dict[str, bool]:
+    """Which editor launchers can actually be spawned server-side.
+
+    @shape return: dict[str, bool] (ide id -> spawnable on this host)
+    """
+    return {
+        ide: any(shutil.which(binary) for binary in binaries)
+        for ide, binaries in _IDE_BINARIES.items()
+    }
+
+
 class _RepoWatcher:
     """Polls tracked ``.py`` / ``.md`` mtimes and broadcasts changes.
 
@@ -141,8 +165,15 @@ class _RepoWatcher:
     snapshots. Subscribers block on a ``threading.Condition`` and are
     woken with the changed paths as soon as a difference is seen.
 
+    Node statuses derive from the Git state (``git status --porcelain``
+    via :meth:`GitProvider.collect_modified_files`) — a commit, stage or
+    reset alters it **without touching any working-tree mtime**, so the
+    Git signature is polled alongside mtimes; otherwise the dashboard
+    would keep stale PASS/MODIFIED/STALE colors until a manual refresh.
+
     @shape snapshot: dict[str, float] (relative path -> mtime)
     @source files: src/core/git_provider.py#function:collect_all_files
+    @source state: src/core/git_provider.py#function:collect_modified_files
     """
 
     def __init__(self, repo_root: str | Path, interval: float = _WATCH_INTERVAL) -> None:
@@ -152,6 +183,7 @@ class _RepoWatcher:
         self._version = 0
         self._changed: list[str] = []
         self._snapshot: dict[str, float] = {}
+        self._git_state = ""
         self._stop = threading.Event()
 
     @property
@@ -163,6 +195,7 @@ class _RepoWatcher:
     def start(self) -> None:
         """Take the baseline snapshot and launch the polling thread."""
         self._snapshot = self._scan()
+        self._git_state = self._git_signature()
         threading.Thread(target=self._loop, daemon=True, name="repo-watcher").start()
 
     def stop(self) -> None:
@@ -194,6 +227,10 @@ class _RepoWatcher:
                 continue
         return snapshot
 
+    def _git_signature(self) -> str:
+        """Stable signature of the Git state driving node statuses."""
+        return "\n".join(GitProvider().collect_modified_files(self._root))
+
     def _loop(self) -> None:
         while not self._stop.is_set():
             time.sleep(self._interval)
@@ -203,13 +240,15 @@ class _RepoWatcher:
                 snapshot = self._scan()
             except Exception:
                 continue  # transient git/FS hiccup — retry next cycle
+            git_state = self._git_signature()
             changed = [
                 rel for rel, mtime in snapshot.items()
                 if self._snapshot.get(rel) != mtime
             ]
             changed += [rel for rel in self._snapshot if rel not in snapshot]
-            if changed:
+            if changed or git_state != self._git_state:
                 self._snapshot = snapshot
+                self._git_state = git_state
                 with self._cond:
                     self._version += 1
                     self._changed = changed
@@ -283,7 +322,11 @@ def _build_handler(repo_root: Path, watcher: _RepoWatcher) -> type[BaseHTTPReque
                 self._send_events()
                 return
             if route == "/api/ides":
-                self._send_json({"ides": detect_installed_ides()})
+                self._send_json({
+                    "ides": detect_installed_ides(),
+                    "launchers": server_launchers(),
+                    "remote": is_remote_session(),
+                })
                 return
             if route in ("/", "/index.html"):
                 self._send_file(UI_DIR / "index.html")

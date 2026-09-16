@@ -1033,16 +1033,40 @@ ideSelect.value = currentIde;
 ideSelect.addEventListener("change", () => {
   currentIde = ideSelect.value;
   localStorage.setItem("omniatlas.ide", currentIde);
+  if (!localStorage.getItem("omniatlas.jumpMode")) applyJumpMode();
 });
+
+let detectedEnv = null;
+
+// Context-aware default (only while the user has never chosen):
+//   1. server launcher available  -> Server CLI (best over Remote-SSH)
+//   2. remote session / non-local page host -> SSH Remote URI
+//   3. otherwise -> Local URI scheme
+function autoJumpMode() {
+  const launchers = (detectedEnv && detectedEnv.launchers) || {};
+  if (launchers[currentIde]) return "cli";
+  const host = window.location.hostname;
+  const isLocal = host === "localhost" || host === "127.0.0.1" || host === "::1";
+  const remote = (detectedEnv && detectedEnv.remote) || !isLocal;
+  if (remote && (currentIde === "vscode" || currentIde === "cursor")) return "ssh";
+  return "local";
+}
+
+function applyJumpMode() {
+  jumpMode = localStorage.getItem("omniatlas.jumpMode") || autoJumpMode();
+  jumpModeSel.value = jumpMode;
+}
 
 fetch("/api/ides", { cache: "no-store" })
   .then((r) => (r.ok ? r.json() : null))
   .then((data) => {
     if (!data || !Array.isArray(data.ides)) return;
+    detectedEnv = data;
     [...ideSelect.options].forEach((opt) => {
       if (data.ides.includes(opt.value))
         opt.textContent = `${opt.textContent} (Detected)`;
     });
+    applyJumpMode();
   })
   .catch(() => {});
 

@@ -21,7 +21,7 @@ the Git staging area — full-repository scans are architecturally forbidden.
 | `linter.py` | Bidirectional collision check & token budget guard |
 | `installer.py` | One-shot pre-commit hook installer (`omni-atlas init`) |
 | `graph.py` | Topology DAG builder, Cytoscape converter & compound container grouping |
-| `server.py` | Zero-dependency stdlib web server: dashboard, SSE change stream (`/api/events`) & IDE detection (`/api/ides`) |
+| `server.py` | Zero-dependency stdlib web server: dashboard, SSE change stream (`/api/events`), editor launch (`POST /api/open-in-editor`) & IDE detection (`/api/ides`) |
 
 ## Symbol Anchors
 
@@ -81,13 +81,19 @@ emitted before children).
 * Headless / SSH detection: [is_headless_environment](src/core/server.py#function:is_headless_environment)
 * IDE environment detector: [detect_installed_ides](src/core/server.py#function:detect_installed_ides)
 * Repository change watcher: [_RepoWatcher](src/core/server.py#class:_RepoWatcher)
+* Server-side editor launcher: [_open_in_editor](src/core/server.py#function:_open_in_editor)
 
 Every code/doc node carries ``absolute_path`` and (for symbols)
-``line_number`` so the dashboard can build ``vscode://file/...`` /
-``idea://open?file=...`` deep links. ``_RepoWatcher`` polls tracked
-``.py`` / ``.md`` mtimes (~0.8s) and pushes ``graph_update`` SSE events
-with the changed paths; the browser re-fetches the topology and flashes
-the affected nodes.
+``line_number`` so the dashboard can jump to source in three modes:
+server CLI execution (``code --goto path:line``, Remote-SSH friendly),
+SSH Remote URI (``ide://vscode-remote/ssh-remote+<host><path>:<line>``)
+or the local URI scheme. The SSE stream sends ``Cache-Control: no-cache``
+and ``X-Accel-Buffering: no`` (proxy buffering was the push-failure root
+cause over SSH tunnels) over HTTP/1.1 with Nagle disabled.
+``_RepoWatcher`` polls tracked ``.py`` / ``.md`` mtimes (~0.8s) and
+pushes ``graph_update`` SSE events; the browser patches the canvas
+incrementally (diff, no layout recalculation) and flashes the nodes
+whose status changed.
 
 ## Data Flow
 

@@ -23,6 +23,7 @@ import json
 import mimetypes
 import os
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -265,9 +266,17 @@ def _build_handler(repo_root: Path, watcher: _RepoWatcher) -> type[BaseHTTPReque
     """Create a request handler class bound to a repository root."""
 
     class _AtlasRequestHandler(BaseHTTPRequestHandler):
+        # HTTP/1.1 gives regular endpoints proper keep-alive (polling mode
+        # reuses one connection) and correct streaming semantics for SSE.
+        # Nagle is disabled so tiny SSE frames are flushed immediately
+        # instead of being coalesced into multi-second bursts — one of the
+        # root causes of "SSE pushes arrive late / never" symptoms.
+        protocol_version = "HTTP/1.1"
+        disable_nagle_algorithm = True
+
         def do_GET(self) -> None:
             route = self.path.split("?", 1)[0]
-            if route == "/api/topology":
+            if route in ("/api/topology", "/api/graph"):
                 self._send_topology()
                 return
             if route == "/api/events":
@@ -281,18 +290,35 @@ def _build_handler(repo_root: Path, watcher: _RepoWatcher) -> type[BaseHTTPReque
                 return
             self._send_static(route)
 
+        def do_POST(self) -> None:
+            if self.path.split("?", 1)[0] == "/api/open-in-editor":
+                self._open_in_editor()
+                return
+            self._send_json_error(404, f"not found: {self.path}")
+
         def _send_events(self) -> None:
             """Stream Server-Sent Events until the client disconnects.
 
+            Each connection runs on its own handler thread and blocks on
+            the watcher's ``Condition`` — the stdlib-threading equivalent
+            of an asyncio.Queue bridge: the shared watcher thread is
+            never blocked by slow clients, and a dead socket raises on
+            the next write and cleans up without touching the watcher.
+
+            Headers: ``Cache-Control: no-cache`` (proxy revalidation
+            off), ``X-Accel-Buffering: no`` (nginx/intermediate layers
+            must not buffer the stream — the primary root cause of SSE
+            pushes never arriving over SSH tunnels / reverse proxies).
+
             Emits ``event: graph_update`` with the changed paths on every
-            detected save and a ``: heartbeat`` comment every 15s to keep
-            intermediaries from closing the idle connection.
+            detected save and a ``: heartbeat`` comment every 15s.
 
             @source watcher: src/core/server.py#class:_RepoWatcher
             """
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-store")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
             self.end_headers()
             version = watcher.version
             try:
@@ -315,6 +341,70 @@ def _build_handler(repo_root: Path, watcher: _RepoWatcher) -> type[BaseHTTPReque
                     self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError, OSError):
                 return
+
+        def _open_in_editor(self) -> None:
+            """Launch the requested editor server-side (Remote-SSH mode).
+
+            Body: ``{"path": <abs-or-rel>, "line": int, "editor": id}``.
+            The path is confined to the repository; the editor binary is
+            spawned without a shell (list argv, injection-safe) and
+            detached so a crash never takes the dashboard down.
+
+            @shape path: str (file inside the repository)
+            @shape line: int (1-based target line)
+            @source binaries: src/core/server.py#var:_IDE_BINARIES
+            """
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                payload = json.loads(self.rfile.read(length) or b"{}")
+            except (ValueError, json.JSONDecodeError):
+                self._send_json_error(400, "invalid JSON body")
+                return
+
+            rel = str(payload.get("path") or "")
+            editor = str(payload.get("editor") or "vscode")
+            try:
+                line = max(1, int(payload.get("line") or 1))
+            except (TypeError, ValueError):
+                line = 1
+
+            target = Path(rel)
+            if not target.is_absolute():
+                target = repo_root / rel
+            target = target.resolve()
+            if not target.is_relative_to(repo_root.resolve()):
+                self._send_json({"ok": False, "error": "path outside repository"})
+                return
+            if not target.is_file():
+                self._send_json({"ok": False, "error": f"file not found: {target.name}"})
+                return
+
+            binary = next(
+                (which for b in _IDE_BINARIES.get(editor, ())
+                 if (which := shutil.which(b))),
+                None,
+            )
+            if binary is None:
+                self._send_json(
+                    {"ok": False, "error": f"{editor} launcher not found on server"}
+                )
+                return
+            args = (
+                [binary, str(target), "--line", str(line)]
+                if editor == "pycharm"
+                else [binary, "--goto", f"{target}:{line}"]
+            )
+            try:
+                subprocess.Popen(
+                    args,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+            except OSError as exc:
+                self._send_json({"ok": False, "error": str(exc)})
+                return
+            self._send_json({"ok": True, "editor": editor, "path": str(target), "line": line})
 
         def _send_topology(self) -> None:
             try:

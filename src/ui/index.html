@@ -31,7 +31,8 @@
   header {
     display: flex;
     align-items: center;
-    gap: 18px;
+    flex-wrap: wrap;
+    gap: 12px 18px;
     padding: 10px 18px;
     background: var(--panel);
     border-bottom: 1px solid var(--panel-border);
@@ -59,6 +60,100 @@
     cursor: pointer;
   }
   #refresh:hover { border-color: var(--accent); color: var(--accent); }
+
+  .filter-bar { display: flex; gap: 6px; }
+  .fbtn {
+    background: transparent;
+    border: 1px solid var(--panel-border);
+    color: var(--text-dim);
+    font-size: 11.5px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .fbtn:hover { border-color: var(--text-dim); color: var(--text); }
+  .fbtn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(0, 206, 201, .08);
+  }
+  #ide-select {
+    background: transparent;
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    font-size: 12px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  #ide-select option { background: var(--panel); color: var(--text); }
+  #refresh-mode {
+    background: transparent;
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    font-size: 12px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  #refresh-mode option { background: var(--panel); color: var(--text); }
+
+  .pop-anchor { position: relative; }
+  #settings-btn {
+    background: transparent;
+    border: 1px solid var(--panel-border);
+    color: var(--text-dim);
+    font-size: 13px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  #settings-btn:hover, #settings-btn.active { border-color: var(--accent); color: var(--accent); }
+  #settings-pop {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    width: 320px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 14px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .5);
+    z-index: 30;
+  }
+  #settings-pop.open { display: block; }
+  .set-row { margin-bottom: 12px; }
+  .set-row label {
+    display: block;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: .8px;
+    color: var(--text-dim);
+    margin-bottom: 5px;
+  }
+  .set-row select, .set-row input {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 6px 9px;
+    font-size: 12px;
+  }
+  .set-row input:focus, .set-row select:focus { outline: none; border-color: var(--accent); }
+  .set-hint {
+    font-size: 10.5px;
+    color: var(--text-dim);
+    line-height: 1.6;
+    border-top: 1px solid var(--panel-border);
+    padding-top: 10px;
+  }
+  .set-hint code {
+    font-family: "JetBrains Mono", Consolas, monospace;
+    font-size: 10px;
+    color: var(--accent);
+  }
 
   #stage { position: relative; flex: 1; min-height: 0; }
   #cy { position: absolute; inset: 0; }
@@ -265,6 +360,32 @@
     cursor: pointer;
   }
   .copy-btn:hover { border-color: #a6e3a1; color: #a6e3a1; }
+  .ide-btn {
+    display: inline-block;
+    margin-left: 10px;
+    background: transparent;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    font-size: 10.5px;
+    padding: 3px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    vertical-align: middle;
+  }
+  .ide-btn:hover { background: rgba(0, 206, 201, .12); }
+  .copy-path-btn {
+    display: inline-block;
+    margin-left: 10px;
+    background: transparent;
+    border: 1px solid var(--panel-border);
+    color: var(--text-dim);
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    vertical-align: middle;
+  }
+  .copy-path-btn:hover { border-color: var(--accent); color: var(--accent); }
   #hint {
     position: absolute;
     right: 14px;
@@ -306,7 +427,45 @@
   <div class="stat"><span class="dot" style="background:var(--modified)"></span>MODIFIED <b id="n-mod">0</b></div>
   <div class="stat"><span class="dot" style="background:var(--stale)"></span>STALE <b id="n-stale">0</b></div>
   <div class="stat">nodes <b id="n-nodes">0</b> · edges <b id="n-edges">0</b></div>
+  <div class="filter-bar" id="filter-bar">
+    <button class="fbtn active" data-filter="all">All</button>
+    <button class="fbtn" data-filter="PASS">🟢 PASS</button>
+    <button class="fbtn" data-filter="MODIFIED">🟡 MODIFIED</button>
+    <button class="fbtn" data-filter="STALE">🔴 STALE</button>
+  </div>
   <div class="spacer"></div>
+  <select id="ide-select" title="Editor used for jump links">
+    <option value="vscode">VS Code</option>
+    <option value="cursor">Cursor</option>
+    <option value="pycharm">PyCharm</option>
+  </select>
+  <div class="pop-anchor">
+    <button id="settings-btn" title="Jump & refresh settings">⚙</button>
+    <div id="settings-pop">
+      <div class="set-row">
+        <label>Jump Mode</label>
+        <select id="jump-mode">
+          <option value="cli">Server CLI (Remote-SSH friendly)</option>
+          <option value="ssh">SSH Remote URI</option>
+          <option value="local">Local URI Scheme</option>
+        </select>
+      </div>
+      <div class="set-row">
+        <label>SSH Host Alias</label>
+        <input id="ssh-host" type="text" spellcheck="false"
+               placeholder="coding server / IP — blank = this host">
+      </div>
+      <div class="set-hint">SSH Remote URI mode builds
+        <code>ide://vscode-remote/ssh-remote+&lt;host&gt;&lt;path&gt;:&lt;line&gt;</code></div>
+    </div>
+  </div>
+  <select id="refresh-mode" title="Graph refresh strategy">
+    <option value="sse">⚡ SSE Realtime</option>
+    <option value="1">1s Poll</option>
+    <option value="5">5s Poll</option>
+    <option value="15">15s Poll</option>
+    <option value="manual">Manual</option>
+  </select>
   <button id="refresh" title="Re-fetch /api/topology and re-layout">↻ Refresh</button>
 </header>
 
@@ -528,6 +687,22 @@ const CY_STYLE = [
     selector: "edge.highlight",
     style: { width: 2.8, opacity: 1, "z-index": 10, "line-color": "#00cec9", "target-arrow-color": "#00cec9" },
   },
+  {
+    selector: ".filter-dim",
+    style: { opacity: 0.1, events: "no" },
+  },
+  {
+    selector: "edge.filter-dim",
+    style: { opacity: 0.06 },
+  },
+  {
+    selector: ".flash-mod",
+    style: { "background-color": "#f1c40f", "border-width": 3, "border-color": "#ffffff" },
+  },
+  {
+    selector: ".flash-stale",
+    style: { "background-color": "#e74c3c", "border-width": 3, "border-color": "#ffffff" },
+  },
 ];
 
 async function loadGraph() {
@@ -544,18 +719,42 @@ async function loadGraph() {
   }
 }
 
-function render(data) {
-  const container = document.getElementById("cy");
-  const tooltip = document.getElementById("tooltip");
-  tooltip.style.display = "none";
-  if (cy) { cy.destroy(); cy = null; }
-
+function preprocessPayload(data) {
   data.nodes.forEach((n) => {
     const d = n.data;
     const raw = String(d.label ?? "");
     d.full_label = d.full_label || raw;
     d.label = d.kind === "external_cli" ? raw : truncateLabel(d.full_label);
   });
+}
+
+function refreshCounts(data) {
+  const counts = { PASS: 0, MODIFIED: 0, STALE: 0 };
+  data.nodes.forEach((n) => {
+    if (!NON_COUNTED.has(n.data.kind))
+      counts[n.data.status] = (counts[n.data.status] || 0) + 1;
+  });
+  document.getElementById("n-pass").textContent = counts.PASS;
+  document.getElementById("n-mod").textContent = counts.MODIFIED;
+  document.getElementById("n-stale").textContent = counts.STALE;
+  document.getElementById("n-nodes").textContent =
+    data.nodes.filter((n) => !NON_COUNTED.has(n.data.kind)).length;
+  document.getElementById("n-edges").textContent = data.edges.length;
+}
+
+function classifyLineageEdges(edges) {
+  edges.forEach((e) => {
+    e.addClass(e.source().data("kind") === "io_node" ? "flow-in" : "flow-out");
+  });
+}
+
+function render(data) {
+  const container = document.getElementById("cy");
+  const tooltip = document.getElementById("tooltip");
+  tooltip.style.display = "none";
+  if (cy) { cy.destroy(); cy = null; }
+
+  preprocessPayload(data);
 
   cy = cytoscape({
     container,
@@ -576,24 +775,12 @@ function render(data) {
     },
   });
 
-  const counts = { PASS: 0, MODIFIED: 0, STALE: 0 };
-  data.nodes.forEach((n) => {
-    if (!NON_COUNTED.has(n.data.kind))
-      counts[n.data.status] = (counts[n.data.status] || 0) + 1;
-  });
-  document.getElementById("n-pass").textContent = counts.PASS;
-  document.getElementById("n-mod").textContent = counts.MODIFIED;
-  document.getElementById("n-stale").textContent = counts.STALE;
-  document.getElementById("n-nodes").textContent =
-    data.nodes.filter((n) => !NON_COUNTED.has(n.data.kind)).length;
-  document.getElementById("n-edges").textContent = data.edges.length;
+  refreshCounts(data);
 
   cy.on("tap", "node", (evt) => selectNode(evt.target));
   cy.on("tap", (evt) => { if (evt.target === cy) resetHighlight(); });
 
-  cy.edges('[kind = "lineage"]').forEach((e) => {
-    e.addClass(e.source().data("kind") === "io_node" ? "flow-in" : "flow-out");
-  });
+  classifyLineageEdges(cy.edges('[kind = "lineage"]'));
 
   cy.on("mouseover", "node", (evt) => {
     const d = evt.target.data();
@@ -610,6 +797,63 @@ function render(data) {
     tooltip.style.display = "block";
   });
   cy.on("mouseout", "node", () => { tooltip.style.display = "none"; });
+
+  applyStatusFilter();
+}
+
+// Incremental canvas patching: diff the fresh payload against the live
+// graph — update in place, add/remove only the delta — so zoom/pan and
+// the physics layout survive every SSE tick untouched.
+const NODE_FIELDS = [
+  "kind", "label", "status", "direction", "parent",
+  "absolute_path", "line_number", "full_label", "full_command", "cli_proto",
+];
+
+function patchGraph(data) {
+  const changed = cy.collection();
+  const newNodes = cy.collection();
+  const payloadNodeIds = new Set();
+
+  data.nodes.forEach((n) => {
+    const d = n.data;
+    payloadNodeIds.add(d.id);
+    const el = cy.getElementById(d.id);
+    if (el.empty()) {
+      newNodes.merge(cy.add({ data: d }));
+      return;
+    }
+    const metaChanged =
+      JSON.stringify(el.data("meta") || {}) !== JSON.stringify(d.meta || {});
+    const statusChanged = el.data("status") !== d.status;
+    if (metaChanged || statusChanged || NODE_FIELDS.some((f) => el.data(f) !== d[f])) {
+      el.data(d);
+      if (statusChanged) changed.merge(el);
+    }
+  });
+
+  cy.nodes().filter((n) => !payloadNodeIds.has(n.id())).remove();
+
+  const payloadEdgeIds = new Set(data.edges.map((e) => e.data.id));
+  cy.edges().filter((e) => !payloadEdgeIds.has(e.id())).remove();
+  data.edges.forEach(({ data: e }) => {
+    if (cy.getElementById(e.id).empty()) {
+      const added = cy.add({ data: e });
+      if (e.kind === "lineage") classifyLineageEdges(added);
+    }
+  });
+
+  newNodes.forEach((n) => {
+    const anchor = n.neighborhood().nodes().filter((x) => !newNodes.contains(x))[0];
+    const base = anchor
+      ? anchor.position()
+      : { x: cy.extent().x1 + cy.extent().w / 2, y: cy.extent().y1 + cy.extent().h / 2 };
+    n.position({
+      x: base.x + (Math.random() * 90 - 45),
+      y: base.y + (Math.random() * 90 - 45),
+    });
+  });
+
+  return changed;
 }
 
 function selectNode(node) {
@@ -678,7 +922,13 @@ function openDrawer(node) {
     }
   }
 
-  if (d.path) parts.push(field("Path", esc(d.path) + (meta.line ? ` : ${esc(meta.line)}` : "")));
+  if (d.path) {
+    const abs = d.absolute_path || d.path;
+    const line = d.line_number || 1;
+    parts.push(field("Path", `${esc(d.path)}${meta.line ? ` : ${esc(String(meta.line))}` : ""}
+      <button class="copy-path-btn" data-path="${esc(abs)}" title="Copy absolute path">⧉</button>
+      <button class="ide-btn" data-abs="${esc(abs)}" data-line="${line}" title="Open in local IDE">🔗 Open in Editor</button>`));
+  }
 
   const fm = meta.frontmatter || {};
   if (Object.keys(fm).length) {
@@ -734,13 +984,17 @@ document.getElementById("drawer-close").addEventListener("click", resetHighlight
 
 document.getElementById("drawer-body").addEventListener("click", (evt) => {
   const btn = evt.target.closest(".copy-btn");
-  if (btn) copyToClipboard(btn.dataset.cmd || "", btn);
+  if (btn) { copyToClipboard(btn.dataset.cmd || "", btn); return; }
+  const cp = evt.target.closest(".copy-path-btn");
+  if (cp) { copyToClipboard(cp.dataset.path || "", cp, "⧉"); return; }
+  const ide = evt.target.closest(".ide-btn");
+  if (ide) openInEditor(ide.dataset.abs, parseInt(ide.dataset.line || "1", 10), ide);
 });
 
-function copyToClipboard(text, btn) {
+function copyToClipboard(text, btn, restoreLabel = "Copy") {
   const done = () => {
     btn.textContent = "✓ Copied";
-    setTimeout(() => { btn.textContent = "Copy"; }, 1200);
+    setTimeout(() => { btn.textContent = restoreLabel; }, 1200);
   };
   if (navigator.clipboard && window.isSecureContext) {
     navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
@@ -759,6 +1013,234 @@ function fallbackCopy(text, done) {
   try { document.execCommand("copy"); done(); } finally { ta.remove(); }
 }
 
+// ---------------------------------------------------------------- //
+// Editor jump: three modes + SSH alias adaptation
+//   1. Server CLI execution (default — works over Remote-SSH, since
+//      the dashboard server runs inside the remote IDE terminal)
+//   2. SSH Remote URI  ide://vscode-remote/ssh-remote+<host><path>:<line>
+//   3. Local URI scheme ide://file/<path>:<line>
+// ---------------------------------------------------------------- //
+
+const IDES = ["vscode", "cursor", "pycharm"];
+let currentIde = localStorage.getItem("omniatlas.ide");
+if (!IDES.includes(currentIde)) currentIde = "vscode";
+
+let jumpMode = localStorage.getItem("omniatlas.jumpMode") || "cli";
+let sshHost = localStorage.getItem("omniatlas.sshHost") || "";
+
+const ideSelect = document.getElementById("ide-select");
+ideSelect.value = currentIde;
+ideSelect.addEventListener("change", () => {
+  currentIde = ideSelect.value;
+  localStorage.setItem("omniatlas.ide", currentIde);
+  if (!localStorage.getItem("omniatlas.jumpMode")) applyJumpMode();
+});
+
+let detectedEnv = null;
+
+// Context-aware default (only while the user has never chosen):
+//   1. server launcher available  -> Server CLI (best over Remote-SSH)
+//   2. remote session / non-local page host -> SSH Remote URI
+//   3. otherwise -> Local URI scheme
+function autoJumpMode() {
+  const launchers = (detectedEnv && detectedEnv.launchers) || {};
+  if (launchers[currentIde]) return "cli";
+  const host = window.location.hostname;
+  const isLocal = host === "localhost" || host === "127.0.0.1" || host === "::1";
+  const remote = (detectedEnv && detectedEnv.remote) || !isLocal;
+  if (remote && (currentIde === "vscode" || currentIde === "cursor")) return "ssh";
+  return "local";
+}
+
+function applyJumpMode() {
+  jumpMode = localStorage.getItem("omniatlas.jumpMode") || autoJumpMode();
+  jumpModeSel.value = jumpMode;
+}
+
+fetch("/api/ides", { cache: "no-store" })
+  .then((r) => (r.ok ? r.json() : null))
+  .then((data) => {
+    if (!data || !Array.isArray(data.ides)) return;
+    detectedEnv = data;
+    [...ideSelect.options].forEach((opt) => {
+      if (data.ides.includes(opt.value))
+        opt.textContent = `${opt.textContent} (Detected)`;
+    });
+    applyJumpMode();
+  })
+  .catch(() => {});
+
+const settingsBtn = document.getElementById("settings-btn");
+const settingsPop = document.getElementById("settings-pop");
+const jumpModeSel = document.getElementById("jump-mode");
+const sshHostInput = document.getElementById("ssh-host");
+
+jumpModeSel.value = jumpMode;
+sshHostInput.value = sshHost;
+jumpModeSel.addEventListener("change", () => {
+  jumpMode = jumpModeSel.value;
+  localStorage.setItem("omniatlas.jumpMode", jumpMode);
+});
+sshHostInput.addEventListener("input", () => {
+  sshHost = sshHostInput.value.trim();
+  localStorage.setItem("omniatlas.sshHost", sshHost);
+});
+settingsBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const open = settingsPop.classList.toggle("open");
+  settingsBtn.classList.toggle("active", open);
+});
+document.addEventListener("click", (e) => {
+  if (!settingsPop.contains(e.target) && e.target !== settingsBtn) {
+    settingsPop.classList.remove("open");
+    settingsBtn.classList.remove("active");
+  }
+});
+
+function showBannerError(text) {
+  const banner = document.getElementById("banner");
+  banner.textContent = text;
+  banner.style.display = "block";
+  clearTimeout(showBannerError._t);
+  showBannerError._t = setTimeout(() => { banner.style.display = "none"; }, 3500);
+}
+
+async function openInEditor(absPath, line, btn) {
+  if (!absPath) return;
+  const restore = () => { if (btn) btn.textContent = "🔗 Open in Editor"; };
+  const label = (text) => { if (btn) btn.textContent = text; };
+
+  if (jumpMode === "cli") {
+    label("⏳ Opening...");
+    try {
+      const res = await fetch("/api/open-in-editor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: absPath, line, editor: currentIde }),
+      });
+      const out = await res.json();
+      if (out.ok) { label("✓ Opened"); }
+      else { label("✖ Failed"); showBannerError(`Open in Editor: ${out.error || res.status}`); }
+    } catch (err) {
+      label("✖ Failed");
+      showBannerError(`Open in Editor: ${err.message}`);
+    }
+    setTimeout(restore, 1500);
+    return;
+  }
+
+  let url;
+  if (jumpMode === "ssh" && (currentIde === "vscode" || currentIde === "cursor")) {
+    const host = (sshHost || window.location.hostname || "localhost").trim();
+    url = `${currentIde}://vscode-remote/ssh-remote+${encodeURIComponent(host)}${encodeURI(absPath)}:${line}`;
+  } else if (currentIde === "pycharm") {
+    url = `idea://open?file=${encodeURIComponent(absPath)}&line=${line}`;
+  } else {
+    url = `${currentIde}://file/${encodeURI(absPath)}:${line}`;
+  }
+  label("✓ Launched");
+  window.open(url, "_blank");
+  setTimeout(restore, 1200);
+}
+
+// ---------------------------------------------------------------- //
+// Status filter bar (multi-select, dims non-matching subgraph)
+// ---------------------------------------------------------------- //
+
+const activeFilters = new Set();
+
+document.querySelectorAll("#filter-bar .fbtn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const f = btn.dataset.filter;
+    if (f === "all") activeFilters.clear();
+    else if (activeFilters.has(f)) activeFilters.delete(f);
+    else activeFilters.add(f);
+    syncFilterButtons();
+    applyStatusFilter();
+  });
+});
+
+function syncFilterButtons() {
+  document.querySelectorAll("#filter-bar .fbtn").forEach((btn) => {
+    const f = btn.dataset.filter;
+    btn.classList.toggle(
+      "active",
+      f === "all" ? activeFilters.size === 0 : activeFilters.has(f)
+    );
+  });
+}
+
+function applyStatusFilter() {
+  if (!cy) return;
+  cy.elements().removeClass("filter-dim");
+  if (!activeFilters.size) return;
+  cy.nodes().forEach((n) => {
+    if (!activeFilters.has(n.data("status"))) n.addClass("filter-dim");
+  });
+  cy.edges().forEach((e) => {
+    if (e.source().hasClass("filter-dim") || e.target().hasClass("filter-dim"))
+      e.addClass("filter-dim");
+  });
+}
+
+// ---------------------------------------------------------------- //
+// Refresh strategies: ⚡ SSE realtime / 1s / 5s / 15s polling / Manual
+// ---------------------------------------------------------------- //
+
+const REFRESH_MODES = ["sse", "1", "5", "15", "manual"];
+let refreshMode = localStorage.getItem("omniatlas.refreshMode");
+if (!REFRESH_MODES.includes(refreshMode)) refreshMode = "sse";
+let pollTimer = null;
+let sseSource = null;
+
+const refreshModeSel = document.getElementById("refresh-mode");
+refreshModeSel.value = refreshMode;
+refreshModeSel.addEventListener("change", () => setRefreshMode(refreshModeSel.value));
+
+function setRefreshMode(mode) {
+  refreshMode = mode;
+  localStorage.setItem("omniatlas.refreshMode", mode);
+  refreshModeSel.value = mode;
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  if (sseSource) { sseSource.close(); sseSource = null; }
+  if (mode === "sse") {
+    sseSource = new EventSource("/api/events");
+    sseSource.addEventListener("graph_update", () => smoothRefresh());
+    sseSource.onerror = () => { /* EventSource reconnects automatically */ };
+  } else if (mode !== "manual") {
+    pollTimer = setInterval(smoothRefresh, parseInt(mode, 10) * 1000);
+  }
+}
+
+async function smoothRefresh() {
+  try {
+    const res = await fetch("/api/topology", { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!cy) { render(data); return; }
+    const changed = patchGraph(data);
+    refreshCounts(data);
+    applyStatusFilter();
+    flashNodes(changed);
+  } catch { /* transient — the next tick retries */ }
+}
+
+function flashNodes(targets) {
+  if (!cy || !targets || targets.length === 0) return;
+  let on = false;
+  const iv = setInterval(() => {
+    on = !on;
+    targets.forEach((n) => {
+      n.removeClass("flash-mod flash-stale");
+      if (on) n.addClass(n.data("status") === "STALE" ? "flash-stale" : "flash-mod");
+    });
+  }, 320);
+  setTimeout(() => {
+    clearInterval(iv);
+    targets.removeClass("flash-mod flash-stale");
+  }, 1500);
+}
+
 window.setInterval(() => {
   if (!cy || cy.destroyed()) return;
   dashPhase = (dashPhase + 11) % 12;
@@ -771,6 +1253,7 @@ if (typeof cytoscape === "undefined") {
   document.getElementById("banner").style.display = "block";
 } else {
   loadGraph();
+  setRefreshMode(refreshMode);
 }
 </script>
 </body>

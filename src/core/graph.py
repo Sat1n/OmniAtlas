@@ -470,6 +470,13 @@ class TopologyGraphBuilder:
         }
         if direction is not None:
             node["direction"] = direction
+        if path:
+            # Editor deep links (vscode://file/..., idea://open?file=...)
+            # need a resolvable absolute path plus a target line.
+            node["absolute_path"] = str((self._root / path).resolve())
+        line = meta.get("line")
+        if line:
+            node["line_number"] = line
         self._nodes[node_id] = node
 
     def _add_edge(self, source: str, target: str, kind: str) -> None:

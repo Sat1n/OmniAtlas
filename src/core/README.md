@@ -21,7 +21,7 @@ the Git staging area — full-repository scans are architecturally forbidden.
 | `linter.py` | Bidirectional collision check & token budget guard |
 | `installer.py` | One-shot pre-commit hook installer (`omni-atlas init`) |
 | `graph.py` | Topology DAG builder, Cytoscape converter & compound container grouping |
-| `server.py` | Zero-dependency stdlib web server hosting the dashboard (`omni-atlas ui`) |
+| `server.py` | Zero-dependency stdlib web server: dashboard, SSE change stream (`/api/events`) & IDE detection (`/api/ides`) |
 
 ## Symbol Anchors
 
@@ -79,6 +79,15 @@ emitted before children).
 
 * Stdlib dashboard server: [AtlasWebServer](src/core/server.py#class:AtlasWebServer)
 * Headless / SSH detection: [is_headless_environment](src/core/server.py#function:is_headless_environment)
+* IDE environment detector: [detect_installed_ides](src/core/server.py#function:detect_installed_ides)
+* Repository change watcher: [_RepoWatcher](src/core/server.py#class:_RepoWatcher)
+
+Every code/doc node carries ``absolute_path`` and (for symbols)
+``line_number`` so the dashboard can build ``vscode://file/...`` /
+``idea://open?file=...`` deep links. ``_RepoWatcher`` polls tracked
+``.py`` / ``.md`` mtimes (~0.8s) and pushes ``graph_update`` SSE events
+with the changed paths; the browser re-fetches the topology and flashes
+the affected nodes.
 
 ## Data Flow
 
@@ -98,4 +107,6 @@ emitted before children).
 
 [L1/L2 Docs + L3 AST] ──> [TopologyGraphBuilder] ──(nodes/edges JSON)──> [AtlasWebServer]
 [omni-atlas ui] ──> [AtlasWebServer] ──(/api/topology + static HTML)──> [Browser Dashboard]
+[File Saves] ──> [_RepoWatcher] ──(SSE graph_update + changed paths)──> [Browser auto-refresh]
+[/api/ides] ──> [detect_installed_ides] ──(vscode/cursor/pycharm)──> [Editor Deep Links]
 ```

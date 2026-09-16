@@ -31,7 +31,8 @@
   header {
     display: flex;
     align-items: center;
-    gap: 18px;
+    flex-wrap: wrap;
+    gap: 12px 18px;
     padding: 10px 18px;
     background: var(--panel);
     border-bottom: 1px solid var(--panel-border);
@@ -59,6 +60,33 @@
     cursor: pointer;
   }
   #refresh:hover { border-color: var(--accent); color: var(--accent); }
+
+  .filter-bar { display: flex; gap: 6px; }
+  .fbtn {
+    background: transparent;
+    border: 1px solid var(--panel-border);
+    color: var(--text-dim);
+    font-size: 11.5px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .fbtn:hover { border-color: var(--text-dim); color: var(--text); }
+  .fbtn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(0, 206, 201, .08);
+  }
+  #ide-select {
+    background: transparent;
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    font-size: 12px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  #ide-select option { background: var(--panel); color: var(--text); }
 
   #stage { position: relative; flex: 1; min-height: 0; }
   #cy { position: absolute; inset: 0; }
@@ -265,6 +293,19 @@
     cursor: pointer;
   }
   .copy-btn:hover { border-color: #a6e3a1; color: #a6e3a1; }
+  .ide-btn {
+    display: inline-block;
+    margin-left: 10px;
+    background: transparent;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    font-size: 10.5px;
+    padding: 3px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    vertical-align: middle;
+  }
+  .ide-btn:hover { background: rgba(0, 206, 201, .12); }
   #hint {
     position: absolute;
     right: 14px;
@@ -306,7 +347,18 @@
   <div class="stat"><span class="dot" style="background:var(--modified)"></span>MODIFIED <b id="n-mod">0</b></div>
   <div class="stat"><span class="dot" style="background:var(--stale)"></span>STALE <b id="n-stale">0</b></div>
   <div class="stat">nodes <b id="n-nodes">0</b> · edges <b id="n-edges">0</b></div>
+  <div class="filter-bar" id="filter-bar">
+    <button class="fbtn active" data-filter="all">All</button>
+    <button class="fbtn" data-filter="PASS">🟢 PASS</button>
+    <button class="fbtn" data-filter="MODIFIED">🟡 MODIFIED</button>
+    <button class="fbtn" data-filter="STALE">🔴 STALE</button>
+  </div>
   <div class="spacer"></div>
+  <select id="ide-select" title="Editor used by the “Open in Editor” deep links">
+    <option value="vscode">VS Code</option>
+    <option value="cursor">Cursor</option>
+    <option value="pycharm">PyCharm</option>
+  </select>
   <button id="refresh" title="Re-fetch /api/topology and re-layout">↻ Refresh</button>
 </header>
 
@@ -528,6 +580,22 @@ const CY_STYLE = [
     selector: "edge.highlight",
     style: { width: 2.8, opacity: 1, "z-index": 10, "line-color": "#00cec9", "target-arrow-color": "#00cec9" },
   },
+  {
+    selector: ".filter-dim",
+    style: { opacity: 0.1, events: "no" },
+  },
+  {
+    selector: "edge.filter-dim",
+    style: { opacity: 0.06 },
+  },
+  {
+    selector: ".flash-mod",
+    style: { "background-color": "#f1c40f", "border-width": 3, "border-color": "#ffffff" },
+  },
+  {
+    selector: ".flash-stale",
+    style: { "background-color": "#e74c3c", "border-width": 3, "border-color": "#ffffff" },
+  },
 ];
 
 async function loadGraph() {
@@ -610,6 +678,8 @@ function render(data) {
     tooltip.style.display = "block";
   });
   cy.on("mouseout", "node", () => { tooltip.style.display = "none"; });
+
+  applyStatusFilter();
 }
 
 function selectNode(node) {
@@ -678,7 +748,12 @@ function openDrawer(node) {
     }
   }
 
-  if (d.path) parts.push(field("Path", esc(d.path) + (meta.line ? ` : ${esc(meta.line)}` : "")));
+  if (d.path) {
+    const abs = d.absolute_path || d.path;
+    const line = d.line_number || 1;
+    parts.push(field("Path", `${esc(d.path)}${meta.line ? ` : ${esc(String(meta.line))}` : ""}
+      <button class="ide-btn" data-abs="${esc(abs)}" data-line="${line}" title="Open in local IDE">🔗 Open in Editor</button>`));
+  }
 
   const fm = meta.frontmatter || {};
   if (Object.keys(fm).length) {
@@ -734,7 +809,9 @@ document.getElementById("drawer-close").addEventListener("click", resetHighlight
 
 document.getElementById("drawer-body").addEventListener("click", (evt) => {
   const btn = evt.target.closest(".copy-btn");
-  if (btn) copyToClipboard(btn.dataset.cmd || "", btn);
+  if (btn) { copyToClipboard(btn.dataset.cmd || "", btn); return; }
+  const ide = evt.target.closest(".ide-btn");
+  if (ide) openInEditor(ide.dataset.abs, parseInt(ide.dataset.line || "1", 10));
 });
 
 function copyToClipboard(text, btn) {
@@ -759,6 +836,122 @@ function fallbackCopy(text, done) {
   try { document.execCommand("copy"); done(); } finally { ta.remove(); }
 }
 
+// ---------------------------------------------------------------- //
+// Editor deep links (VS Code / Cursor / PyCharm)
+// ---------------------------------------------------------------- //
+
+const IDES = ["vscode", "cursor", "pycharm"];
+let currentIde = localStorage.getItem("omniatlas.ide");
+if (!IDES.includes(currentIde)) currentIde = "vscode";
+
+const ideSelect = document.getElementById("ide-select");
+ideSelect.value = currentIde;
+ideSelect.addEventListener("change", () => {
+  currentIde = ideSelect.value;
+  localStorage.setItem("omniatlas.ide", currentIde);
+});
+
+fetch("/api/ides", { cache: "no-store" })
+  .then((r) => (r.ok ? r.json() : null))
+  .then((data) => {
+    if (!data || !Array.isArray(data.ides)) return;
+    [...ideSelect.options].forEach((opt) => {
+      if (data.ides.includes(opt.value))
+        opt.textContent = `${opt.textContent} (Detected)`;
+    });
+  })
+  .catch(() => {});
+
+function openInEditor(absPath, line) {
+  if (!absPath) return;
+  const url = currentIde === "pycharm"
+    ? `idea://open?file=${encodeURIComponent(absPath)}&line=${line}`
+    : `${currentIde}://file/${encodeURI(absPath)}:${line}`;
+  window.open(url, "_blank");
+}
+
+// ---------------------------------------------------------------- //
+// Status filter bar (multi-select, dims non-matching subgraph)
+// ---------------------------------------------------------------- //
+
+const activeFilters = new Set();
+
+document.querySelectorAll("#filter-bar .fbtn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const f = btn.dataset.filter;
+    if (f === "all") activeFilters.clear();
+    else if (activeFilters.has(f)) activeFilters.delete(f);
+    else activeFilters.add(f);
+    syncFilterButtons();
+    applyStatusFilter();
+  });
+});
+
+function syncFilterButtons() {
+  document.querySelectorAll("#filter-bar .fbtn").forEach((btn) => {
+    const f = btn.dataset.filter;
+    btn.classList.toggle(
+      "active",
+      f === "all" ? activeFilters.size === 0 : activeFilters.has(f)
+    );
+  });
+}
+
+function applyStatusFilter() {
+  if (!cy) return;
+  cy.elements().removeClass("filter-dim");
+  if (!activeFilters.size) return;
+  cy.nodes().forEach((n) => {
+    if (!activeFilters.has(n.data("status"))) n.addClass("filter-dim");
+  });
+  cy.edges().forEach((e) => {
+    if (e.source().hasClass("filter-dim") || e.target().hasClass("filter-dim"))
+      e.addClass("filter-dim");
+  });
+}
+
+// ---------------------------------------------------------------- //
+// Live updates via Server-Sent Events
+// ---------------------------------------------------------------- //
+
+function connectEvents() {
+  const es = new EventSource("/api/events");
+  es.addEventListener("graph_update", (evt) => {
+    let changed = [];
+    try { changed = JSON.parse(evt.data).changed || []; } catch { /* noop */ }
+    smoothRefresh(changed);
+  });
+  es.onerror = () => { /* EventSource reconnects automatically */ };
+}
+
+async function smoothRefresh(changedPaths) {
+  try {
+    const res = await fetch("/api/topology", { cache: "no-store" });
+    if (!res.ok) return;
+    render(await res.json());
+    flashNodes(changedPaths);
+  } catch { /* transient — next event retries */ }
+}
+
+function flashNodes(paths) {
+  if (!cy) return;
+  const set = new Set(paths || []);
+  const targets = cy.nodes().filter((n) => set.has(n.data("path")));
+  if (!targets.length) return;
+  let on = false;
+  const iv = setInterval(() => {
+    on = !on;
+    targets.forEach((n) => {
+      n.removeClass("flash-mod flash-stale");
+      if (on) n.addClass(n.data("status") === "STALE" ? "flash-stale" : "flash-mod");
+    });
+  }, 320);
+  setTimeout(() => {
+    clearInterval(iv);
+    targets.removeClass("flash-mod flash-stale");
+  }, 1700);
+}
+
 window.setInterval(() => {
   if (!cy || cy.destroyed()) return;
   dashPhase = (dashPhase + 11) % 12;
@@ -771,6 +964,7 @@ if (typeof cytoscape === "undefined") {
   document.getElementById("banner").style.display = "block";
 } else {
   loadGraph();
+  connectEvents();
 }
 </script>
 </body>

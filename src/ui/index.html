@@ -6,6 +6,9 @@
 <title>OmniAtlas · Topology Dashboard</title>
 <script src="vendor/cytoscape.min.js"></script>
 <script src="vendor/marked.min.js"></script>
+<script src="vendor/dagre.min.js"></script>
+<script src="vendor/cytoscape-dagre.js"></script>
+<script src="vendor/cytoscape-svg.js"></script>
 <style>
   :root {
     --bg: #0f1419;
@@ -77,7 +80,7 @@
     color: var(--accent);
     background: rgba(0, 206, 201, .08);
   }
-  #ide-select {
+  #ide-select, #refresh-mode, #layout-select {
     background: transparent;
     border: 1px solid var(--panel-border);
     color: var(--text);
@@ -86,17 +89,8 @@
     border-radius: 6px;
     cursor: pointer;
   }
-  #ide-select option { background: var(--panel); color: var(--text); }
-  #refresh-mode {
-    background: transparent;
-    border: 1px solid var(--panel-border);
-    color: var(--text);
-    font-size: 12px;
-    padding: 5px 8px;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-  #refresh-mode option { background: var(--panel); color: var(--text); }
+  #ide-select option, #refresh-mode option, #layout-select option { background: var(--panel); color: var(--text); }
+  #ide-select:focus, #refresh-mode:focus, #layout-select:focus { outline: none; border-color: var(--accent); }
 
   .pop-anchor { position: relative; }
   #settings-btn {
@@ -154,6 +148,69 @@
     font-size: 10px;
     color: var(--accent);
   }
+
+  #export-btn {
+    background: transparent;
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    font-size: 12px;
+    padding: 5px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  #export-btn:hover, #export-btn.active { border-color: var(--accent); color: var(--accent); }
+  .menu {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    min-width: 200px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .5);
+    z-index: 30;
+  }
+  .menu.open { display: block; }
+  .menu-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--text);
+    font-size: 12px;
+    padding: 7px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .menu-item:hover { background: rgba(0, 206, 201, .1); color: var(--accent); }
+  .menu hr { border: none; border-top: 1px solid var(--panel-border); margin: 5px 6px; }
+
+  #focus-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 6px 3px 12px;
+    border: 1px solid var(--accent);
+    border-radius: 999px;
+    background: rgba(0, 206, 201, .08);
+    font-size: 11.5px;
+  }
+  #focus-bar[hidden] { display: none; }
+  .focus-label b {
+    color: var(--accent);
+    max-width: 200px;
+    display: inline-block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+  }
+  .depth-group { display: flex; gap: 4px; }
+  .depth-btn { padding: 3px 10px; font-size: 11px; }
+  .depth-btn.active { border-color: var(--accent); color: var(--accent); }
 
   #stage { position: relative; flex: 1; min-height: 0; }
   #cy { position: absolute; inset: 0; }
@@ -433,6 +490,21 @@
     <button class="fbtn" data-filter="MODIFIED">🟡 MODIFIED</button>
     <button class="fbtn" data-filter="STALE">🔴 STALE</button>
   </div>
+  <select id="layout-select" title="Graph layout engine (animated switch)">
+    <option value="cose">Force-Directed (Cose)</option>
+    <option value="dagre-tb">DAG (Top-Down)</option>
+    <option value="dagre-lr">DAG (Left-Right)</option>
+    <option value="concentric">Concentric</option>
+  </select>
+  <div id="focus-bar" hidden>
+    <span class="focus-label">🎯 <b id="focus-target">—</b></span>
+    <span class="depth-group">
+      <button class="fbtn depth-btn" data-depth="1">1-hop</button>
+      <button class="fbtn depth-btn" data-depth="2">2-hop</button>
+      <button class="fbtn depth-btn" data-depth="all">All-hop</button>
+    </span>
+    <button class="fbtn" id="focus-reset">✕ Reset</button>
+  </div>
   <div class="spacer"></div>
   <select id="ide-select" title="Editor used for jump links">
     <option value="vscode">VS Code</option>
@@ -467,6 +539,18 @@
     <option value="manual">Manual</option>
   </select>
   <button id="refresh" title="Re-fetch /api/topology and re-layout">↻ Refresh</button>
+  <div class="pop-anchor">
+    <button id="export-btn" title="Export view / snapshot">⬇ Export</button>
+    <div id="export-menu" class="menu">
+      <button class="menu-item" id="export-svg">SVG Vector</button>
+      <button class="menu-item" id="export-png-dark">PNG (2x · Dark)</button>
+      <button class="menu-item" id="export-png-alpha">PNG (2x · Transparent)</button>
+      <hr>
+      <button class="menu-item" id="export-json">Snapshot (JSON)</button>
+      <button class="menu-item" id="import-json">Import Snapshot…</button>
+    </div>
+  </div>
+  <input type="file" id="import-file" accept="application/json,.json" hidden>
 </header>
 
 <div id="stage">
@@ -703,6 +787,18 @@ const CY_STYLE = [
     selector: ".flash-stale",
     style: { "background-color": "#e74c3c", "border-width": 3, "border-color": "#ffffff" },
   },
+  {
+    selector: ".focus-dim",
+    style: { opacity: 0.12 },
+  },
+  {
+    selector: ".focus-keep",
+    style: { "border-width": 2, "border-color": "#00cec9" },
+  },
+  {
+    selector: "edge.focus-keep",
+    style: { width: 2, opacity: 1 },
+  },
 ];
 
 async function loadGraph() {
@@ -753,6 +849,8 @@ function render(data) {
   const tooltip = document.getElementById("tooltip");
   tooltip.style.display = "none";
   if (cy) { cy.destroy(); cy = null; }
+  focusState = null;
+  document.getElementById("focus-bar").hidden = true;
 
   preprocessPayload(data);
 
@@ -776,9 +874,52 @@ function render(data) {
   });
 
   refreshCounts(data);
+  attachCanvasHandlers();
+}
 
-  cy.on("tap", "node", (evt) => selectNode(evt.target));
-  cy.on("tap", (evt) => { if (evt.target === cy) resetHighlight(); });
+function renderSnapshot(payload) {
+  const container = document.getElementById("cy");
+  const tooltip = document.getElementById("tooltip");
+  tooltip.style.display = "none";
+  if (cy) { cy.destroy(); cy = null; }
+  focusState = null;
+  document.getElementById("focus-bar").hidden = true;
+
+  preprocessPayload(payload);
+
+  cy = cytoscape({
+    container,
+    elements: [...payload.nodes, ...payload.edges],
+    style: CY_STYLE,
+    wheelSensitivity: 0.25,
+    layout: { name: "preset", fit: true, padding: 56 },
+  });
+  if (payload.view && payload.view.zoom) {
+    cy.zoom(payload.view.zoom);
+    cy.pan(payload.view.pan);
+  }
+
+  refreshCounts(payload);
+  attachCanvasHandlers();
+}
+
+function attachCanvasHandlers() {
+  const tooltip = document.getElementById("tooltip");
+  let lastTap = { id: null, time: 0 };
+
+  cy.on("tap", "node", (evt) => {
+    const now = Date.now();
+    const id = evt.target.id();
+    if (lastTap.id === id && now - lastTap.time < 400) {
+      lastTap = { id: null, time: 0 };
+      if (evt.target.degree() > 0) { enterFocus(evt.target, 1); return; }
+    }
+    lastTap = { id, time: now };
+    selectNode(evt.target);
+  });
+  cy.on("tap", (evt) => {
+    if (evt.target === cy) { exitFocus(); resetHighlight(); }
+  });
 
   classifyLineageEdges(cy.edges('[kind = "lineage"]'));
 
@@ -800,6 +941,71 @@ function render(data) {
 
   applyStatusFilter();
 }
+
+// ---------------------------------------------------------------- //
+// Subgraph focus mode: double-click isolates the dependency cone
+// (upstream suppliers + downstream consumers) at 1/2/all-hop depth.
+// ---------------------------------------------------------------- //
+
+let focusState = null;
+
+function enterFocus(node, depth) {
+  focusState = {
+    id: node.id(),
+    label: node.data("full_label") || node.data("label") || node.id(),
+    depth: depth || (focusState && focusState.depth) || 1,
+  };
+  applyFocus();
+}
+
+function applyFocus() {
+  if (!cy || !focusState) return;
+  const root = cy.getElementById(focusState.id);
+  if (root.empty()) { exitFocus(); return; }
+
+  const keep = cy.collection(root);
+  let frontier = root;
+  const max = focusState.depth === "all" ? Infinity : focusState.depth;
+  for (let hop = 0; hop < max; hop++) {
+    const next = frontier
+      .predecessors().nodes()
+      .union(frontier.successors().nodes())
+      .filter((n) => !keep.contains(n));
+    if (next.empty()) break;
+    keep.merge(next);
+    frontier = next;
+  }
+
+  cy.elements().removeClass("faded highlight focus-dim focus-keep");
+  cy.elements().addClass("focus-dim");
+  keep.removeClass("focus-dim").addClass("focus-keep");
+  cy.edges()
+    .filter((e) => keep.contains(e.source()) && keep.contains(e.target()))
+    .removeClass("focus-dim")
+    .addClass("focus-keep");
+
+  document.getElementById("focus-target").textContent = focusState.label;
+  document.querySelectorAll(".depth-btn").forEach((b) =>
+    b.classList.toggle("active", b.dataset.depth === String(focusState.depth))
+  );
+  document.getElementById("focus-bar").hidden = false;
+}
+
+function exitFocus() {
+  focusState = null;
+  if (!cy) return;
+  cy.elements().removeClass("focus-dim focus-keep");
+  document.getElementById("focus-bar").hidden = true;
+}
+
+document.querySelectorAll("#focus-bar .depth-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    if (!focusState) return;
+    focusState.depth = btn.dataset.depth === "all" ? "all" : parseInt(btn.dataset.depth, 10);
+    applyFocus();
+  });
+});
+document.getElementById("focus-reset").addEventListener("click", () => { exitFocus(); resetHighlight(); });
 
 // Incremental canvas patching: diff the fresh payload against the live
 // graph — update in place, add/remove only the delta — so zoom/pan and
@@ -979,7 +1185,13 @@ function closeDrawer() {
   document.getElementById("drawer").classList.remove("open");
 }
 
-document.getElementById("refresh").addEventListener("click", loadGraph);
+document.getElementById("refresh").addEventListener("click", () => {
+  snapshotMode = null;
+  const banner = document.getElementById("banner");
+  banner.style.display = "none";
+  banner.style.cursor = "";
+  loadGraph();
+});
 document.getElementById("drawer-close").addEventListener("click", resetHighlight);
 
 document.getElementById("drawer-body").addEventListener("click", (evt) => {
@@ -1184,6 +1396,67 @@ function applyStatusFilter() {
 }
 
 // ---------------------------------------------------------------- //
+// Layout engines: animated switching, state/selection preserved
+// ---------------------------------------------------------------- //
+
+const LAYOUTS = {
+  cose: () => ({
+    name: "cose",
+    animate: true,
+    animationDuration: 500,
+    randomize: false,
+    nodeRepulsion: 260000,
+    idealEdgeLength: 100,
+    edgeElasticity: 110,
+    nodeOverlap: 14,
+    componentSpacing: 80,
+    nestingFactor: 2.4,
+    gravity: 0.25,
+    padding: 56,
+  }),
+  "dagre-tb": () => ({
+    name: "dagre",
+    rankDir: "TB",
+    nodeSep: 30,
+    edgeSep: 12,
+    rankSep: 70,
+    padding: 46,
+    animate: true,
+    animationDuration: 500,
+  }),
+  "dagre-lr": () => ({
+    name: "dagre",
+    rankDir: "LR",
+    nodeSep: 22,
+    edgeSep: 12,
+    rankSep: 90,
+    padding: 46,
+    animate: true,
+    animationDuration: 500,
+  }),
+  concentric: () => ({
+    name: "concentric",
+    concentric: (n) => n.degree(),
+    levelWidth: () => 2.5,
+    minNodeSpacing: 34,
+    spacingFactor: 1.15,
+    padding: 56,
+    animate: true,
+    animationDuration: 500,
+  }),
+};
+
+const layoutSelect = document.getElementById("layout-select");
+layoutSelect.addEventListener("change", () => applyLayout(layoutSelect.value));
+
+function applyLayout(name) {
+  if (!cy) return;
+  const factory = LAYOUTS[name];
+  if (!factory) return;
+  cy.layout(factory()).run();
+}
+
+// ---------------------------------------------------------------- //
 // Refresh strategies: ⚡ SSE realtime / 1s / 5s / 15s polling / Manual
 // ---------------------------------------------------------------- //
 
@@ -1213,6 +1486,7 @@ function setRefreshMode(mode) {
 }
 
 async function smoothRefresh() {
+  if (snapshotMode) return;  // static snapshot view — live updates paused
   try {
     const res = await fetch("/api/topology", { cache: "no-store" });
     if (!res.ok) return;
@@ -1222,6 +1496,7 @@ async function smoothRefresh() {
     refreshCounts(data);
     applyStatusFilter();
     flashNodes(changed);
+    if (focusState) applyFocus();
   } catch { /* transient — the next tick retries */ }
 }
 
@@ -1247,11 +1522,118 @@ window.setInterval(() => {
   cy.edges('[kind = "lineage"]').style("line-dash-offset", dashPhase);
 }, 70);
 
+// ---------------------------------------------------------------- //
+// Export: SVG vector / 2x PNG / JSON snapshot with positions & view
+// ---------------------------------------------------------------- //
+
+const exportBtn = document.getElementById("export-btn");
+const exportMenu = document.getElementById("export-menu");
+const importFile = document.getElementById("import-file");
+
+exportBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const open = exportMenu.classList.toggle("open");
+  exportBtn.classList.toggle("active", open);
+});
+document.addEventListener("click", (e) => {
+  if (!exportMenu.contains(e.target) && e.target !== exportBtn) {
+    exportMenu.classList.remove("open");
+    exportBtn.classList.remove("active");
+  }
+});
+
+let snapshotMode = null;  // filename of the loaded snapshot (pauses live updates)
+
+function download(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+const fileStamp = () => new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+
+function exitSnapshot() {
+  if (!snapshotMode) return;
+  snapshotMode = null;
+  const banner = document.getElementById("banner");
+  banner.style.display = "none";
+  banner.style.cursor = "";
+  loadGraph();
+}
+
+function exportSvg() {
+  if (!cy) return;
+  const svg = cy.svg({ bg: "#0f1419", full: true });
+  download(
+    new Blob([svg], { type: "image/svg+xml;charset=utf-8" }),
+    `omniatlas-topology-${fileStamp()}.svg`
+  );
+}
+
+function exportPng(transparent) {
+  if (!cy) return;
+  const opts = { output: "blob", full: true, scale: 2 };
+  if (!transparent) opts.bg = "#0f1419";
+  download(cy.png(opts), `omniatlas-topology-${fileStamp()}.png`);
+}
+
+function exportSnapshot() {
+  if (!cy) return;
+  const payload = {
+    type: "omniatlas-snapshot",
+    version: 1,
+    savedAt: new Date().toISOString(),
+    view: { zoom: cy.zoom(), pan: cy.pan() },
+    nodes: cy.nodes().map((n) => ({ data: n.data(), position: n.position() })),
+    edges: cy.edges().map((e) => ({ data: e.data() })),
+  };
+  download(
+    new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }),
+    `omniatlas-snapshot-${fileStamp()}.json`
+  );
+}
+
+function importSnapshot(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const payload = JSON.parse(reader.result);
+      if (payload.type !== "omniatlas-snapshot" || !Array.isArray(payload.nodes))
+        throw new Error("not an OmniAtlas snapshot");
+      renderSnapshot(payload);
+      snapshotMode = file.name;
+      const banner = document.getElementById("banner");
+      banner.textContent = `📷 Snapshot loaded: ${file.name} — static view, live updates paused. Click here or ↻ Refresh to return.`;
+      banner.style.display = "block";
+      banner.style.cursor = "pointer";
+    } catch (err) {
+      showBannerError(`Import failed: ${err.message}`);
+    }
+  };
+  reader.readAsText(file);
+}
+
+document.getElementById("export-svg").addEventListener("click", () => { exportSvg(); exportMenu.classList.remove("open"); exportBtn.classList.remove("active"); });
+document.getElementById("export-png-dark").addEventListener("click", () => { exportPng(false); exportMenu.classList.remove("open"); exportBtn.classList.remove("active"); });
+document.getElementById("export-png-alpha").addEventListener("click", () => { exportPng(true); exportMenu.classList.remove("open"); exportBtn.classList.remove("active"); });
+document.getElementById("export-json").addEventListener("click", () => { exportSnapshot(); exportMenu.classList.remove("open"); exportBtn.classList.remove("active"); });
+document.getElementById("import-json").addEventListener("click", () => { importFile.click(); exportMenu.classList.remove("open"); exportBtn.classList.remove("active"); });
+importFile.addEventListener("change", () => {
+  if (importFile.files && importFile.files[0]) importSnapshot(importFile.files[0]);
+  importFile.value = "";
+});
+document.getElementById("banner").addEventListener("click", () => exitSnapshot());
+
 if (typeof cytoscape === "undefined") {
   document.getElementById("banner").textContent =
     "Cytoscape.js failed to load — check vendor/cytoscape.min.js";
   document.getElementById("banner").style.display = "block";
 } else {
+  if (typeof cytoscapeDagre !== "undefined") cytoscape.use(cytoscapeDagre);
+  if (typeof cytoscapeSvg !== "undefined") cytoscape.use(cytoscapeSvg);
   loadGraph();
   setRefreshMode(refreshMode);
 }

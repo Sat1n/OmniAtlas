@@ -16,7 +16,7 @@ the Git staging area — full-repository scans are architecturally forbidden.
 
 | File | Responsibility |
 |---|---|
-| `git_provider.py` | Incremental Git diff scanning engine (staging area collection) |
+| `git_provider.py` | Incremental Git diff engine, gitignore-aware discovery & exclusion policy (`.omniignore`, `[scan].exclude`) |
 | `parser.py` | Markdown anchor extraction, frontmatter parsing, block-safe excerpts, Tree-sitter AST verification & multi-language parser registry (TS/JS, Go, Rust, C/C++) |
 | `linter.py` | Bidirectional collision check, token budget guard & informational cross-language API audit |
 | `linker.py` | Frontend fetch/axios calls ➔ backend route matcher (Python/Go) producing `api` edges |
@@ -32,16 +32,26 @@ the Git staging area — full-repository scans are architecturally forbidden.
 ### Git Collection Engine (`git_provider.py`)
 
 * Staged file collector: [GitProvider](src/core/git_provider.py#class:GitProvider)
+* Exclusion policy matcher: [IgnoreMatcher](src/core/git_provider.py#class:IgnoreMatcher)
+* Merged ignore loader (`.omniignore` + `[scan].exclude` + CLI): [build_ignore_matcher](src/core/git_provider.py#function:build_ignore_matcher)
 * Incremental boundary collection: [collect_staged_changes](src/core/git_provider.py#function:collect_staged_changes)
 * Full-project CI sweep: [collect_all_files](src/core/git_provider.py#function:collect_all_files)
 * Git modification state overlay: [collect_modified_files](src/core/git_provider.py#function:collect_modified_files)
 * Classified staging result: [StagedChanges](src/core/git_provider.py#class:StagedChanges)
 
+Full scans (`check --all`, `ui`, `doctor`, the SSE watcher) enumerate
+files via ``git ls-files --cached --others --exclude-standard`` so
+``.gitignore`` applies verbatim, falling back to a filesystem walk
+outside Git repositories. Built-in skips (dot trees, ``.venv``,
+``node_modules``, ``__pycache__``, ``vendor``) and the merged exclusion
+policy (``.omniignore`` + ``[scan].exclude`` + CLI ``--exclude``) apply
+on top and are reported as ``FILE_SKIPPED`` diagnostics.
+
 ### Parsing Engines (`parser.py`)
 
 * Markdown frontmatter & anchor extractor: [MarkdownParser](src/core/parser.py#class:MarkdownParser)
 * Tree-sitter AST symbol engine: [PythonASTParser](src/core/parser.py#class:PythonASTParser)
-* Multi-language registry: [LanguageRegistry](src/core/parser.py#class:LanguageRegistry)
+* Multi-language registry (Py/TS/JS/Go/Rust/C/C++/C#): [LanguageRegistry](src/core/parser.py#class:LanguageRegistry)
 * Unified per-file extraction: [parse_file](src/core/parser.py#function:parse_file)
 * Block-safe excerpt extractor: [excerpt](src/core/parser.py#function:excerpt)
 * Extracted anchor record: [SymbolAnchor](src/core/parser.py#class:SymbolAnchor)

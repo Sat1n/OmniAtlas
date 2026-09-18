@@ -15,7 +15,12 @@ Implements the bidirectional collision check plus the token guard:
 from dataclasses import dataclass
 from pathlib import Path
 
-from core.git_provider import IGNORED_DIRS, GitProvider, StagedChanges
+from core.git_provider import (
+    IGNORED_DIRS,
+    GitProvider,
+    StagedChanges,
+    build_ignore_matcher,
+)
 from core.linker import FRONTEND_EXTENSIONS, ApiLinker
 from core.parser import (
     LanguageRegistry,
@@ -81,8 +86,11 @@ class ApiCheck:
 class LinterEngine:
     """Orchestrates the bidirectional collision check and token guard."""
 
-    def __init__(self, repo_root: str | Path = ".") -> None:
+    def __init__(
+        self, repo_root: str | Path = ".", extra_excludes: list[str] | None = None
+    ) -> None:
         self._root = Path(repo_root)
+        self._exclude = list(extra_excludes or [])
         self._md_parser = MarkdownParser()
         self._ast_parser = PythonASTParser()
         self._registry = LanguageRegistry()
@@ -164,7 +172,9 @@ class LinterEngine:
         })
         if not frontend:
             return []
-        all_files = GitProvider().collect_all_files(self._root).code_files
+        all_files = GitProvider().collect_all_files(
+            self._root, extra_excludes=self._exclude
+        ).code_files
         links = self._linker.build_links(all_files, self._root)
         checks: list[ApiCheck] = []
         seen: set[tuple[str, str, str]] = set()
@@ -193,10 +203,18 @@ class LinterEngine:
         return checks
 
     def _discover_markdown_docs(self) -> list[Path]:
-        """List project Markdown files, skipping vendored/hidden trees."""
+        """List project Markdown files, skipping vendored/hidden trees.
+
+        The merged exclusion policy (``.omniignore`` + ``[scan].exclude``
+        + CLI extras) applies here too, so a doc directory excluded from
+        scanning is also exempt from reverse-sync checks.
+        """
+        matcher = build_ignore_matcher(self._root, self._exclude)
         docs: list[Path] = []
         for path in sorted(self._root.rglob("*.md")):
             if any(part in IGNORED_DIRS for part in path.parts):
+                continue
+            if matcher.matches(path.relative_to(self._root).as_posix()):
                 continue
             docs.append(path)
         return docs

@@ -15,7 +15,7 @@ This repository contains the core implementation of the OmniAtlas Linter toolcha
 * **Runtime:** Python 3.12 (Selected for optimal stability, robust type-hinting features, and mature pre-compiled binary wheel support for C-extensions).
 * **Package Management:** `uv` (Fast, reliable, rust-backed project initialization and dependency management).
 * **CLI Framework:** `typer` (Type-hint driven command-line interface generation).
-* **AST Parser Engine:** `tree-sitter` with Python, TypeScript/JavaScript, Go, Rust and C/C++ grammar packs (C-optimized, incremental syntax trees for fault-tolerant multi-language symbol verification).
+* **AST Parser Engine:** `tree-sitter` with Python, TypeScript/JavaScript, Go, Rust, C/C++ and C# grammar packs (C-optimized, incremental syntax trees for fault-tolerant multi-language symbol verification).
 * **Terminal UI:** `rich` (For high-fidelity, aesthetic terminal reporting and structural error visualization).
 
 ## 3. Global Architecture & Directory Topology
@@ -33,7 +33,7 @@ omni-atlas/
     ├── omni_atlas/       # Installable package namespace (wheel: omni_atlas.*)
     │   └── cli/main.py   # CLI Entrypoint & command routing (Typer)
     ├── core/
-    │   ├── git_provider.py # Incremental Git diff scanning engine
+    │   ├── git_provider.py # Incremental Git diff engine & exclusion policy
     │   ├── parser.py       # Markdown anchors + multi-language Tree-sitter registry
     │   ├── linker.py       # Frontend/backend API call matcher (API_CALL edges)
     │   ├── linter.py       # Core double-verification engine (Collision logic)

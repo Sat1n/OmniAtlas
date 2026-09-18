@@ -193,6 +193,7 @@ GRAMMAR_PACKAGES = {
     "rust": "tree-sitter-rust",
     "c": "tree-sitter-c",
     "cpp": "tree-sitter-cpp",
+    "c_sharp": "tree-sitter-c-sharp",
 }
 
 
@@ -332,7 +333,9 @@ def _iter_nodes(node):
         stack.extend(reversed(current.children))
 
 
-def scan_workspace(root: str | Path = ".") -> WorkspaceReport:
+def scan_workspace(
+    root: str | Path = ".", extra_excludes: list[str] | None = None
+) -> WorkspaceReport:
     """Parse every workspace file and aggregate the health report.
 
     @shape return: WorkspaceReport
@@ -348,7 +351,9 @@ def scan_workspace(root: str | Path = ".") -> WorkspaceReport:
     registry = LanguageRegistry()
     report = WorkspaceReport(root=sanitize_path(root_path, root_path))
 
-    changes = GitProvider().collect_all_files(root_path)
+    changes = GitProvider().collect_all_files(
+        root_path, extra_excludes=extra_excludes
+    )
     for rel in changes.code_files:
         report.total_files += 1
         path = root_path / rel

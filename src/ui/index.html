@@ -568,7 +568,7 @@
     <div class="row"><span class="swatch rhomboid" style="background:#89dceb"></span> ⬇ Input Node</div>
     <div class="row"><svg class="swatch-svg" width="22" height="18" viewBox="0 0 22 18"><polygon points="2,2 14,2 20,9 14,16 2,16" fill="#f5c2e7"/></svg> ⬆ Output Node</div>
     <div class="row"><svg class="swatch-svg" width="22" height="18" viewBox="0 0 22 18"><polygon points="2,2 14,2 20,9 14,16 2,16" fill="#1e1e2e" stroke="#a6e3a1" stroke-width="1.5"/></svg> $&gt; CLI / Env Command</div>
-    <div class="row"><span class="swatch octagon" style="background:var(--external)"></span> Struct / Enum (Go·Rust·C++)</div>
+    <div class="row"><span class="swatch octagon" style="background:var(--external)"></span> Struct / Enum (Go·Rust·C++·C#)</div>
     <div class="row"><span class="swatch api-line"></span> API Call (FE → BE)</div>
     <div class="row"><span class="swatch rect" style="background:rgba(178,190,195,.12); border:1px dashed #313244"></span> Top Docs Group</div>
     <hr>
@@ -876,28 +876,33 @@ function render(data) {
   document.getElementById("focus-bar").hidden = true;
 
   preprocessPayload(data);
+  seedPositions(data);
 
   cy = cytoscape({
     container,
     elements: [...data.nodes, ...data.edges],
     style: CY_STYLE,
     wheelSensitivity: 0.25,
-    layout: {
-      name: "cose",
-      animate: false,
-      nodeRepulsion: 260000,
-      idealEdgeLength: 100,
-      edgeElasticity: 110,
-      nodeOverlap: 14,
-      componentSpacing: 80,
-      nestingFactor: 2.4,
-      gravity: 0.25,
-      padding: 56,
-    },
+    layout: { name: "preset", fit: false, padding: 56 },  // seeded positions
   });
 
   refreshCounts(data);
   attachCanvasHandlers();
+
+  // Run the initial cose pass explicitly so the compound-box normalization
+  // happens strictly after `layoutstop` — firing it earlier lets the main
+  // mass keep expanding into the parked group.
+  const initialLayout = cy.layout({
+    name: "cose",
+    animate: false,
+    randomize: false,
+    ...COSE_PARAMS,
+  });
+  initialLayout.one("layoutstop", () => {
+    normalizeCompoundGroup();
+    cy.fit(cy.elements(), 60);
+  });
+  initialLayout.run();
 }
 
 function renderSnapshot(payload) {
@@ -1071,15 +1076,28 @@ function patchGraph(data) {
     }
   });
 
+  // Sequential placement so later nodes can anchor onto earlier ones
+  // (a new file node gets its fresh symbols placed around it instead of
+  // everything piling up at the graph center).
+  const pending = new Set(newNodes.map((n) => n.id()));
+  const occupied = cy.nodes()
+    .filter((n) => !pending.has(n.id()))
+    .map((n) => n.position());
+  const center = {
+    x: cy.extent().x1 + cy.extent().w / 2,
+    y: cy.extent().y1 + cy.extent().h / 2,
+  };
   newNodes.forEach((n) => {
-    const anchor = n.neighborhood().nodes().filter((x) => !newNodes.contains(x))[0];
-    const base = anchor
-      ? anchor.position()
-      : { x: cy.extent().x1 + cy.extent().w / 2, y: cy.extent().y1 + cy.extent().h / 2 };
-    n.position({
-      x: base.x + (Math.random() * 90 - 45),
-      y: base.y + (Math.random() * 90 - 45),
-    });
+    pending.delete(n.id());
+    const neighbor = n
+      .neighborhood()
+      .nodes()
+      .filter((x) => !pending.has(x.id()))
+      .first();
+    const origin = neighbor.nonempty() ? neighbor.position() : center;
+    const spot = findFreeSpot(origin, occupied);
+    n.position(spot);
+    occupied.push(spot);
   });
 
   return changed;
@@ -1429,20 +1447,93 @@ function applyStatusFilter() {
 // Layout engines: animated switching, state/selection preserved
 // ---------------------------------------------------------------- //
 
+// Deterministic force parameters shared by the initial render and the
+// layout switcher. `randomize: false` plus seeded start positions makes
+// the cose result identical across reloads; a stronger gravity keeps
+// disconnected components (fixtures, compound boxes) near the center.
+const COSE_PARAMS = {
+  nodeRepulsion: 180000,
+  idealEdgeLength: 90,
+  edgeElasticity: 110,
+  nodeOverlap: 14,
+  componentSpacing: 60,
+  nestingFactor: 2.4,
+  gravity: 0.7,
+  padding: 56,
+};
+
+function seedPositions(data) {
+  const count = Math.max(1, data.nodes.length);
+  const radius = Math.max(140, data.nodes.length * 16);
+  data.nodes.forEach((entry, index) => {
+    const angle = (index / count) * Math.PI * 2;
+    entry.position = {
+      x: radius * Math.cos(angle),
+      y: radius * Math.sin(angle),
+    };
+  });
+}
+
+// Compound containers have no edges, so force layouts fling them around.
+// After every cose run we park the Top Docs group in a tidy grid to the
+// right of the main mass — the parent box derives from its children, so
+// moving the children moves the box. Deterministic and collision-free.
+function normalizeCompoundGroup() {
+  if (!cy) return;
+  const group = cy.getElementById("group_blueprints");
+  if (group.empty() || group.children().empty()) return;
+  // NB: collection.contains() tests membership in the collection itself,
+  // not descendants — a child's `parent()` must be checked explicitly.
+  const inGroup = (n) => n.parent().nonempty() && n.parent().id() === group.id();
+  const others = cy.nodes().filter((n) => !n.isParent() && !inGroup(n));
+  if (others.empty()) return;
+  const bbox = others.boundingBox();
+  const children = group.children();
+  const columns = 2;
+  const dx = 130;
+  const dy = 84;
+  const x0 = bbox.x2 + 150;
+  const y0 = bbox.y1;
+  children.forEach((child, index) => {
+    child.position({
+      x: x0 + (index % columns) * dx,
+      y: y0 + Math.floor(index / columns) * dy,
+    });
+  });
+}
+
+// First free position on a deterministic spiral around the anchor.
+function findFreeSpot(origin, occupied) {
+  const minGap = 78;
+  const isFree = (p) =>
+    occupied.every((q) => Math.hypot(q.x - p.x, q.y - p.y) >= minGap);
+  if (isFree(origin)) return { x: origin.x, y: origin.y };
+  for (let ring = 1; ring <= 8; ring++) {
+    const radius = 55 + ring * 38;
+    const steps = ring * 6;
+    for (let step = 0; step < steps; step++) {
+      const angle = (step / steps) * Math.PI * 2;
+      const candidate = {
+        x: origin.x + radius * Math.cos(angle),
+        y: origin.y + radius * Math.sin(angle),
+      };
+      if (isFree(candidate)) return candidate;
+    }
+  }
+  const bb = cy.elements().boundingBox();
+  return {
+    x: bb.x2 + 100 + (occupied.length % 4) * 70,
+    y: bb.y1,
+  };
+}
+
 const LAYOUTS = {
   cose: () => ({
     name: "cose",
     animate: true,
     animationDuration: 500,
     randomize: false,
-    nodeRepulsion: 260000,
-    idealEdgeLength: 100,
-    edgeElasticity: 110,
-    nodeOverlap: 14,
-    componentSpacing: 80,
-    nestingFactor: 2.4,
-    gravity: 0.25,
-    padding: 56,
+    ...COSE_PARAMS,
   }),
   "dagre-tb": () => ({
     name: "dagre",
@@ -1483,7 +1574,14 @@ function applyLayout(name) {
   if (!cy) return;
   const factory = LAYOUTS[name];
   if (!factory) return;
-  cy.layout(factory()).run();
+  const layout = cy.layout(factory());
+  if (name === "cose") {
+    layout.one("layoutstop", () => {
+      normalizeCompoundGroup();
+      cy.fit(cy.elements(), 60);
+    });
+  }
+  layout.run();
 }
 
 // ---------------------------------------------------------------- //

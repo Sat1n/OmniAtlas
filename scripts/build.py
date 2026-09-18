@@ -27,6 +27,7 @@ GRAMMAR_PACKAGES = (
     "tree_sitter_rust",
     "tree_sitter_c",
     "tree_sitter_cpp",
+    "tree_sitter_c_sharp",
 )
 
 #: Distribution names for importlib metadata (doctor reports versions).
@@ -38,6 +39,7 @@ METADATA_PACKAGES = (
     "tree-sitter-rust",
     "tree-sitter-c",
     "tree-sitter-cpp",
+    "tree-sitter-c-sharp",
 )
 
 

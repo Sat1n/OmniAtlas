@@ -26,3 +26,11 @@
 # language = "rust"
 # name = "trait"
 # path = "queries/rust_traits.scm"
+#
+# [scan]
+# Additional glob exclusions applied to every file-discovery path, on top
+# of the built-in skips, .gitignore (for full scans via git ls-files) and
+# a sibling .omniignore file. Patterns without a slash match ANY path
+# segment; `**/name` also matches at the repository root.
+#
+# exclude = [".vs", ".vsconfig", "*.user", "**/bin", "**/obj", "**/x64", "**/Debug", "**/Release"]

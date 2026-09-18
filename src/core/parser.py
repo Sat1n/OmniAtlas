@@ -438,6 +438,7 @@ _GRAMMAR_SPECS = (
     ("rust", "tree_sitter_rust", "language", (".rs",)),
     ("c", "tree_sitter_c", "language", (".c", ".h")),
     ("cpp", "tree_sitter_cpp", "language", (".cc", ".cpp", ".hpp")),
+    ("c_sharp", "tree_sitter_c_sharp", "language", (".cs",)),
 )
 
 
@@ -609,6 +610,7 @@ class LanguageRegistry:
             "rust": self._extract_rust,
             "c": self._extract_c,
             "cpp": self._extract_c,
+            "c_sharp": self._extract_csharp,
             "python": self._extract_python,
         }[lang]
         extractor(tree.root_node, facts)
@@ -865,6 +867,35 @@ class LanguageRegistry:
                 text = self._text(self._field(node, "argument"))
                 if text:
                     facts.imports.append(text.strip())
+
+    def _extract_csharp(self, root, facts: FileFacts) -> None:
+        """C# symbols: classes, structs, interfaces, enums, methods, usings."""
+        declaration_kinds = {
+            "class_declaration": "class",
+            "struct_declaration": "struct",
+            "interface_declaration": "interface",
+            "enum_declaration": "enum",
+            "record_declaration": "class",
+            "method_declaration": "method",
+            "constructor_declaration": "method",
+            "property_declaration": "var",
+        }
+        for node in self._walk(root):
+            kind = declaration_kinds.get(node.type)
+            if kind is not None:
+                name = self._field(node, "name")
+                if name is not None:
+                    facts.symbols.append(
+                        SymbolDecl(self._text(name), kind, node.start_point[0] + 1)
+                    )
+            elif node.type == "using_directive":
+                # `using Foo.Bar;` — the directive text minus the keyword.
+                text = self._text(node).strip().rstrip(";")
+                namespace = text[len("using"):].strip()
+                if "=" in namespace:  # using alias = ...
+                    namespace = namespace.split("=", 1)[1].strip()
+                if namespace:
+                    facts.imports.append(namespace)
 
     def _extract_c(self, root, facts: FileFacts) -> None:
         for node in self._walk(root):

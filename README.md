@@ -24,14 +24,17 @@ interactive dependency graph for humans and AI agents.
 
 ## ✨ Features
 
-* **Zero-dependency single binary** — UI assets and 7+ Tree-sitter C
-  extensions (Python, TypeScript/JS, Go, Rust, C, C++, HTML) are
+* **Zero-dependency single binary** — UI assets and 8 Tree-sitter
+  grammars (Python, TypeScript/JS, Go, Rust, C/C++, C#, HTML) are
   embedded; no Python runtime required.
 * **Native MCP integration** — one command wires OmniAtlas into Cursor
   or Claude Desktop (`init-mcp`), merging configs safely.
 * **Incremental & private** — Git-diff-scoped checks, a deduplicated
   ring-buffer watcher (mtime + git state), and automatic path
   sanitization so reports never leak user directories.
+* **Configurable exclusions** — `.gitignore` (full scans via
+  `git ls-files`), `.omniignore`, `[scan].exclude` in
+  `.omni-atlas.toml`, or repeatable `--exclude` CLI globs.
 * **Multi-language API linking** — `fetch`/axios/EventSource calls are
   matched to FastAPI/Flask/Gin/stdlib routes as `API_CALL` edges.
 * **Custom SCM queries** — extend symbol extraction via

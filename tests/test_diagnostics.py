@@ -126,9 +126,9 @@ def test_environment_info_lists_grammars() -> None:
     env = environment_info()
     assert env["python"]
     packages = {grammar["language"] for grammar in env["grammars"]}
-    assert {"python", "typescript", "go", "rust", "c", "cpp"} <= packages
+    assert {"python", "typescript", "go", "rust", "c", "cpp", "c_sharp"} <= packages
     loaded = [g for g in env["grammars"] if g["loaded"]]
-    assert len(loaded) >= 6
+    assert len(loaded) >= 7
 
 
 def test_cli_doctor_detects_syntax_error_file() -> None:

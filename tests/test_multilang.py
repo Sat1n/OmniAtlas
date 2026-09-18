@@ -12,7 +12,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 def test_registry_languages(registry: LanguageRegistry) -> None:
     available = registry.available_languages
-    for lang in ("python", "typescript", "go", "rust", "c", "cpp"):
+    for lang in ("python", "typescript", "go", "rust", "c", "cpp", "c_sharp"):
         assert lang in available, f"{lang} grammar failed to load"
     assert registry.language_for("a.ts") == "typescript"
     assert registry.language_for("a.tsx") == "tsx"
@@ -51,6 +51,17 @@ def test_cpp_facts(registry: LanguageRegistry) -> None:
     assert ("main", "function") in names
     assert "util.h" in facts.imports  # local quoted include
     assert "<cstdio>" in facts.imports  # system include kept verbatim
+
+
+def test_csharp_facts(registry: LanguageRegistry) -> None:
+    facts = registry.parse_file(FIXTURES / "Program.cs")
+    names = {(s.name, s.kind) for s in facts.symbols}
+    assert ("Engine", "class") in names
+    assert ("IEngine", "interface") in names
+    assert ("EngineState", "enum") in names
+    assert ("EngineStats", "struct") in names
+    assert ("Start", "method") in names
+    assert "System.Collections.Generic" in facts.imports
 
 
 def test_api_linker_matches_fixtures(registry: LanguageRegistry) -> None:

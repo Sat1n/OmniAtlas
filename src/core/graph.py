@@ -73,8 +73,11 @@ _SNIPPET_LIMIT = 1400
 class TopologyGraphBuilder:
     """Assembles the project topology and converts it to Cytoscape data."""
 
-    def __init__(self, repo_root: str | Path = ".") -> None:
+    def __init__(
+        self, repo_root: str | Path = ".", extra_excludes: list[str] | None = None
+    ) -> None:
         self._root = Path(repo_root)
+        self._exclude = list(extra_excludes or [])
         self._git = GitProvider()
         self._md_parser = MarkdownParser()
         self._ast_parser = PythonASTParser()
@@ -96,7 +99,9 @@ class TopologyGraphBuilder:
         self._edges.clear()
         self._id_map.clear()
 
-        docs = self._git.collect_all_files(self._root).doc_files
+        docs = self._git.collect_all_files(
+            self._root, extra_excludes=self._exclude
+        ).doc_files
         parsed = {doc: self._md_parser.parse(doc) for doc in docs}
         for doc in docs:
             self._add_doc_node(doc, parsed[doc])
@@ -401,7 +406,9 @@ class TopologyGraphBuilder:
 
         @source facts: src/core/parser.py#function:parse_file
         """
-        changes = self._git.collect_all_files(self._root)
+        changes = self._git.collect_all_files(
+            self._root, extra_excludes=self._exclude
+        )
         files = [f for f in changes.code_files if Path(f).suffix != ".py"]
         for path in files:
             facts = self._registry.parse_file(path)
@@ -474,7 +481,9 @@ class TopologyGraphBuilder:
 
         @source links: src/core/linker.py#class:ApiLinker
         """
-        changes = self._git.collect_all_files(self._root)
+        changes = self._git.collect_all_files(
+            self._root, extra_excludes=self._exclude
+        )
         links = self._linker.build_links(list(changes.code_files), self._root)
         for link in links:
             source_id = self._ensure_file_node(link.source_file)

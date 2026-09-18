@@ -84,6 +84,19 @@ def test_target_name_mapping() -> None:
     assert target_name("Windows", "arm64") == "omni-atlas-win-arm64.exe"
 
 
+def test_version_consistency() -> None:
+    """pyproject, CLI banner and MCP serverInfo must never drift apart."""
+    import tomllib
+
+    from core.mcp import SERVER_VERSION
+    from omni_atlas.cli.main import VERSION
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    package_version = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"]
+    assert VERSION == package_version, f"CLI {VERSION} != pyproject {package_version}"
+    assert SERVER_VERSION == package_version, f"MCP {SERVER_VERSION} != pyproject {package_version}"
+
+
 def test_ui_dir_prefers_meipass(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
     assert server_module._ui_dir() == tmp_path / "ui"

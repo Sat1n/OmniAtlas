@@ -9,9 +9,16 @@ Parses the optional repo-root config file:
     name = "interface"
     query = "(type_spec name: (type_identifier) @symbol)"
 
-Each entry extends the multi-language parser registry with a custom SCM
-query — inline (``query``) or loaded from a file (``path``). Captures
-named ``@symbol`` become graph symbols labelled with the entry ``name``.
+    [scan]
+    exclude = [".vs", "**/bin", "*.user"]
+
+Each ``[[custom_scm]]`` entry extends the multi-language parser registry
+with a custom SCM query — inline (``query``) or loaded from a file
+(``path``). Captures named ``@symbol`` become graph symbols labelled
+with the entry ``name``.
+
+The ``[scan]`` table declares exclusion globs applied to every file
+discovery path (in addition to ``.omniignore`` and ``.gitignore``).
 
 Fault tolerance is a hard requirement: a malformed TOML file or an
 invalid SCM query only produces a warning and is skipped — the base AST
@@ -46,6 +53,7 @@ class ProjectConfig:
     """Aggregated project configuration."""
 
     custom_scm: list[CustomScm] = field(default_factory=list)
+    exclude: list[str] = field(default_factory=list)
 
 
 def load_config(repo_root: str | Path = ".") -> ProjectConfig:
@@ -63,10 +71,22 @@ def load_config(repo_root: str | Path = ".") -> ProjectConfig:
         _warn(f"ignoring {CONFIG_FILENAME}: {exc}")
         return ProjectConfig()
 
+    scan = data.get("scan") or {}
+    if isinstance(scan, dict):
+        raw_exclude = scan.get("exclude") or []
+        if isinstance(raw_exclude, list):
+            config_exclude = [str(p).strip() for p in raw_exclude if str(p).strip()]
+        else:
+            _warn(f"ignoring {CONFIG_FILENAME}: [scan].exclude must be a list")
+            config_exclude = []
+    else:
+        _warn(f"ignoring {CONFIG_FILENAME}: [scan] must be a table")
+        config_exclude = []
+
     entries = data.get("custom_scm", [])
     if not isinstance(entries, list):
         _warn(f"ignoring {CONFIG_FILENAME}: [[custom_scm]] must be a list")
-        return ProjectConfig()
+        return ProjectConfig(exclude=config_exclude)
 
     config = ProjectConfig()
     for raw in entries:
@@ -96,6 +116,7 @@ def load_config(repo_root: str | Path = ".") -> ProjectConfig:
                 path=str(path) if path else None,
             )
         )
+    config.exclude = config_exclude
     return config
 
 

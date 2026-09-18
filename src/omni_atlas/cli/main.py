@@ -33,7 +33,7 @@ from core.mcp import (
 )
 from core.server import AtlasWebServer, is_headless_environment
 
-VERSION = "0.0.1"
+VERSION = "0.2.0"
 
 app = typer.Typer(
     name="omni-atlas",
@@ -56,6 +56,12 @@ def check(
         "--json",
         help="Emit pure machine-readable JSON (no ANSI colors, no tables).",
     ),
+    exclude: list[str] = typer.Option(
+        None,
+        "--exclude",
+        "-x",
+        help="Glob to exclude (repeatable, e.g. -x '**/bin' -x '*.user').",
+    ),
 ) -> None:
     """Run an incremental lint pass over the Git staging area.
 
@@ -65,10 +71,10 @@ def check(
     """
     provider = GitProvider()
     if all:
-        changes = provider.collect_all_files()
+        changes = provider.collect_all_files(extra_excludes=exclude)
         mode = "all"
     else:
-        changes = provider.collect_staged_changes()
+        changes = provider.collect_staged_changes(extra_excludes=exclude)
         mode = "staged"
 
     if not json_output:
@@ -90,7 +96,7 @@ def check(
             changes, "Full Project Scan" if all else "Staged Changes Detected"
         )
 
-    engine = LinterEngine()
+    engine = LinterEngine(extra_excludes=exclude)
     anchor_checks = engine.check_anchors(changes.doc_files)
     sync_checks = engine.check_reverse_sync(changes)
     token_checks = engine.check_token_budgets(changes.doc_files)
@@ -190,9 +196,12 @@ def graph(
         "--json",
         help="Emit the Cytoscape topology JSON (pure, machine-readable).",
     ),
+    exclude: list[str] = typer.Option(
+        None, "--exclude", "-x", help="Glob to exclude (repeatable)."
+    ),
 ) -> None:
     """Export the project architecture graph (Cytoscape JSON with --json)."""
-    builder = TopologyGraphBuilder().build()
+    builder = TopologyGraphBuilder(extra_excludes=exclude).build()
     payload = builder.to_dict()
     if json_output:
         _emit_json(payload)
@@ -280,10 +289,14 @@ def mcp() -> None:
 
 
 @app.command()
-def doctor() -> None:
+def doctor(
+    exclude: list[str] = typer.Option(
+        None, "--exclude", "-x", help="Glob to exclude (repeatable)."
+    ),
+) -> None:
     """Environment & workspace health check (diagnostics, doctor mode)."""
     env = environment_info()
-    report = scan_workspace(".")
+    report = scan_workspace(".", extra_excludes=exclude)
 
     env_table = Table(show_header=False, expand=False)
     env_table.add_column(style="bold cyan", no_wrap=True)

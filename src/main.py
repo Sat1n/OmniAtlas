@@ -4,6 +4,7 @@ Supreme framework meta-specification: ``BLUEPRINT.md``.
 Project architecture panorama: ``AGENTS.md``.
 """
 
+import json
 import webbrowser
 
 import typer
@@ -13,8 +14,10 @@ from rich.table import Table
 from rich.text import Text
 
 from core.git_provider import GitProvider, StagedChanges
+from core.graph import TopologyGraphBuilder
 from core.installer import HookInstaller, InstallResult
 from core.linter import AnchorCheck, ApiCheck, LinterEngine, SyncCheck, TokenCheck
+from core.mcp import McpServer
 from core.server import AtlasWebServer, is_headless_environment
 
 VERSION = "0.0.1"
@@ -35,31 +38,44 @@ def check(
         "-a",
         help="Scan every project file instead of only the Git staging area (CI mode).",
     ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit pure machine-readable JSON (no ANSI colors, no tables).",
+    ),
 ) -> None:
     """Run an incremental lint pass over the Git staging area.
 
     Default mode inspects only staged files (pre-commit fast gate);
     ``--all`` performs a full-project sweep (CI/CD pipeline mode).
+    ``--json`` prints the headless report consumed by agents and CI.
     """
-    console.print(
-        f"[bold green]Initializing OmniAtlas Linter v{VERSION}...[/bold green]"
-    )
-
     provider = GitProvider()
     if all:
         changes = provider.collect_all_files()
-        mode_title = "Full Project Scan"
+        mode = "all"
     else:
         changes = provider.collect_staged_changes()
-        mode_title = "Staged Changes Detected"
+        mode = "staged"
+
+    if not json_output:
+        console.print(
+            f"[bold green]Initializing OmniAtlas Linter v{VERSION}...[/bold green]"
+        )
 
     if not changes.code_files and not changes.doc_files:
-        console.print(
-            "[yellow]No target files detected. Everything is clean.[/yellow]"
-        )
+        if json_output:
+            _emit_json(_build_check_payload(mode, changes, [], [], [], []))
+        else:
+            console.print(
+                "[yellow]No target files detected. Everything is clean.[/yellow]"
+            )
         raise typer.Exit(code=0)
 
-    _render_changes(changes, mode_title)
+    if not json_output:
+        _render_changes(
+            changes, "Full Project Scan" if all else "Staged Changes Detected"
+        )
 
     engine = LinterEngine()
     anchor_checks = engine.check_anchors(changes.doc_files)
@@ -67,21 +83,131 @@ def check(
     token_checks = engine.check_token_budgets(changes.doc_files)
     api_checks = engine.check_api_links(changes)
 
-    _render_anchor_integrity(anchor_checks)
-    _render_doc_sync(sync_checks)
-    _render_token_guard(token_checks)
-    _render_api_links(api_checks)
-
     missing = [c for c in anchor_checks if not c.found]
     stale = [c for c in sync_checks if not c.in_sync]
     oversized = [c for c in token_checks if not c.passed]
 
+    if json_output:
+        _emit_json(
+            _build_check_payload(
+                mode, changes, anchor_checks, sync_checks, token_checks, api_checks
+            )
+        )
+    else:
+        _render_anchor_integrity(anchor_checks)
+        _render_doc_sync(sync_checks)
+        _render_token_guard(token_checks)
+        _render_api_links(api_checks)
+
     if missing or stale or oversized:
-        _render_repair_advice(missing, stale, oversized)
+        if not json_output:
+            _render_repair_advice(missing, stale, oversized)
         raise typer.Exit(code=1)
 
-    console.print("[bold green]✔ All checks passed![/bold green]")
+    if not json_output:
+        console.print("[bold green]✔ All checks passed![/bold green]")
     raise typer.Exit(code=0)
+
+
+def _emit_json(payload: dict) -> None:
+    """Print pure JSON on stdout — no rich, no ANSI, no banners."""
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def _build_check_payload(
+    mode: str,
+    changes: StagedChanges,
+    anchor_checks: list[AnchorCheck],
+    sync_checks: list[SyncCheck],
+    token_checks: list[TokenCheck],
+    api_checks: list[ApiCheck],
+) -> dict:
+    """Serialize every check result into the headless JSON contract."""
+    missing = [c for c in anchor_checks if not c.found]
+    stale = [c for c in sync_checks if not c.in_sync]
+    oversized = [c for c in token_checks if not c.passed]
+    unmatched = [c for c in api_checks if not c.matched]
+    return {
+        "ok": not (missing or stale or oversized),
+        "mode": mode,
+        "files": {"code": changes.code_files, "docs": changes.doc_files},
+        "anchors": {
+            "total": len(anchor_checks),
+            "found": len(anchor_checks) - len(missing),
+            "missing": [
+                {
+                    "doc_file": c.doc_file,
+                    "target_file": c.anchor.file_path,
+                    "symbol": f"{c.anchor.symbol_type}:{c.anchor.symbol_name}",
+                }
+                for c in missing
+            ],
+        },
+        "sync": {
+            "total": len(sync_checks),
+            "stale": [
+                {"code_file": c.code_file, "doc_file": c.doc_file} for c in stale
+            ],
+        },
+        "tokens": [
+            {
+                "doc_file": c.doc_file,
+                "level": c.level,
+                "tokens": c.tokens,
+                "limit": c.limit,
+                "passed": c.passed,
+            }
+            for c in token_checks
+        ],
+        "api_links": {
+            "total": len(api_checks),
+            "linked": len(api_checks) - len(unmatched),
+            "unmatched": [
+                {"source_file": c.source_file, "method": c.method, "path": c.path}
+                for c in unmatched
+            ],
+        },
+    }
+
+
+@app.command()
+def graph(
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit the Cytoscape topology JSON (pure, machine-readable).",
+    ),
+) -> None:
+    """Export the project architecture graph (Cytoscape JSON with --json)."""
+    builder = TopologyGraphBuilder().build()
+    payload = builder.to_dict()
+    if json_output:
+        _emit_json(payload)
+        raise typer.Exit(code=0)
+
+    by_kind: dict[str, int] = {}
+    by_status: dict[str, int] = {}
+    for node in payload["nodes"]:
+        data = node["data"]
+        by_kind[data["kind"]] = by_kind.get(data["kind"], 0) + 1
+        by_status[data["status"]] = by_status.get(data["status"], 0) + 1
+    lines = [
+        f"nodes [bold]{payload['meta']['node_count']}[/bold] · "
+        f"edges [bold]{payload['meta']['edge_count']}[/bold]",
+        "",
+        "kinds: " + ", ".join(f"{k}×{v}" for k, v in sorted(by_kind.items())),
+        "status: " + ", ".join(f"{k}×{v}" for k, v in sorted(by_status.items())),
+        "",
+        "Use [bold]--json[/bold] for the full Cytoscape payload.",
+    ]
+    console.print(Panel("\n".join(lines), title="OmniAtlas Topology", border_style="green"))
+    raise typer.Exit(code=0)
+
+
+@app.command()
+def mcp() -> None:
+    """Run the headless MCP server (stdio JSON-RPC) for AI coding agents."""
+    McpServer().serve_forever()
 
 
 @app.command()

@@ -88,5 +88,5 @@ def load_config(repo_root: str | Path = ".") -> ProjectConfig:
 
 
 def _warn(message: str) -> None:
-    """Emit a non-fatal configuration warning."""
-    Console().print(f"[yellow]omni-atlas: {message}[/yellow]")
+    """Emit a non-fatal configuration warning to stderr (stdout stays clean)."""
+    Console(stderr=True).print(f"[yellow]omni-atlas: {message}[/yellow]")

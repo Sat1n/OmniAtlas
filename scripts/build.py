@@ -77,6 +77,13 @@ def build_command(name: str) -> list[str]:
 
 
 def main() -> int:
+    # Windows consoles default to cp1252 — a stray glyph must never crash
+    # the build (observed as UnicodeEncodeError on windows-latest CI).
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
     name = target_name()
     if shutil.which("uv") is None:
         print("error: uv is required on PATH (https://docs.astral.sh/uv/)", file=sys.stderr)
@@ -91,7 +98,7 @@ def main() -> int:
         print(f"error: expected binary not found: {binary}", file=sys.stderr)
         return 1
     size_mb = binary.stat().st_size / (1024 * 1024)
-    print(f"\n✔ built {binary} ({size_mb:.1f} MiB)")
+    print(f"\n[OK] built {binary} ({size_mb:.1f} MiB)")
     return 0
 
 

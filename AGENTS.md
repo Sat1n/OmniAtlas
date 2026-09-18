@@ -26,7 +26,7 @@ omni-atlas/
 ├── AGENTS.md             # This file (Global project architecture panorama)
 ├── .omni-atlas.toml      # Project config: custom SCM query extensions
 ├── pyproject.toml        # Project metadata and uv dependency locks
-├── scripts/              # PyInstaller one-command build (scripts/build.py)
+├── scripts/              # PyInstaller build entry (local + CI binaries)
 ├── .github/              # Release workflow: tag-triggered matrix builds
 ├── tests/                # Pytest suite & multi-language fixtures
 └── src/

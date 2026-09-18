@@ -67,6 +67,10 @@ while preserving other MCP servers; without it the JSON is printed to
 stdout. Four agent tools are exposed: `get_architectural_context`,
 `check_doc_sync`, `query_topology` and `diagnose_workspace`.
 
+Tagged releases (`v*`) build the same one-file binaries for
+Linux/macOS/Windows via GitHub Actions and smoke-test each one before
+publishing.
+
 ## 🧭 CLI Cheatsheet
 
 | Command | Purpose |

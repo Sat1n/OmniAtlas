@@ -88,9 +88,11 @@ client configuration for Cursor and Claude Desktop.
 [sys._MEIPASS](src/core/server.py#function:_ui_dir) when running as a
 PyInstaller one-file binary. ``python scripts/build.py`` bundles the
 CLI, the dashboard and every Tree-sitter C-extension into
-``omni-atlas-<os>-<arch>``; pushing a ``v*`` tag runs the GitHub
-Actions matrix (Linux/macOS/Windows), generates a categorized changelog
-from commit prefixes and attaches all binaries to the release.
+``omni-atlas-<os>-<arch>`` with Windows-console-safe output; pushing a
+``v*`` tag runs the GitHub Actions matrix (Linux/macOS/Windows),
+smoke-tests every binary (``--help`` / ``doctor`` / ``init-mcp``),
+generates a categorized changelog from commit prefixes and attaches all
+binaries to the release.
 
 ### Diagnostics & Health (`diagnostics.py`)
 

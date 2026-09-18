@@ -14,7 +14,7 @@ from rich.text import Text
 
 from core.git_provider import GitProvider, StagedChanges
 from core.installer import HookInstaller, InstallResult
-from core.linter import AnchorCheck, LinterEngine, SyncCheck, TokenCheck
+from core.linter import AnchorCheck, ApiCheck, LinterEngine, SyncCheck, TokenCheck
 from core.server import AtlasWebServer, is_headless_environment
 
 VERSION = "0.0.1"
@@ -65,10 +65,12 @@ def check(
     anchor_checks = engine.check_anchors(changes.doc_files)
     sync_checks = engine.check_reverse_sync(changes)
     token_checks = engine.check_token_budgets(changes.doc_files)
+    api_checks = engine.check_api_links(changes)
 
     _render_anchor_integrity(anchor_checks)
     _render_doc_sync(sync_checks)
     _render_token_guard(token_checks)
+    _render_api_links(api_checks)
 
     missing = [c for c in anchor_checks if not c.found]
     stale = [c for c in sync_checks if not c.in_sync]
@@ -309,6 +311,39 @@ def _report_panel(table: Table, title: str, subtitle: str, ok: bool) -> None:
     """Wrap a section table in a consistently styled report panel."""
     console.print(
         Panel(table, title=title, subtitle=subtitle, border_style="green" if ok else "red")
+    )
+
+
+def _render_api_links(checks: list[ApiCheck]) -> None:
+    """Section 4: [LINKED] / [UNMATCHED] cross-language API audit."""
+    if not checks:
+        return
+
+    table = Table(show_header=True, header_style="bold magenta", expand=False)
+    table.add_column("Status", justify="center", no_wrap=True)
+    table.add_column("Method", justify="center", no_wrap=True)
+    table.add_column("Endpoint")
+    table.add_column("Frontend", no_wrap=True)
+    table.add_column("Backend", no_wrap=True)
+
+    linked_count = 0
+    for c in checks:
+        if c.matched:
+            linked_count += 1
+            status = "[bold green][LINKED][/bold green]"
+            target = f"{c.target_file} ➔ {c.target_symbol}"
+        else:
+            status = "[bold yellow][UNMATCHED][/bold yellow]"
+            target = "—"
+        table.add_row(status, c.method, c.path, c.source_file, target)
+
+    console.print(
+        Panel(
+            table,
+            title="Cross-Language API Links (informational)",
+            subtitle=f"{linked_count} linked · {len(checks) - linked_count} unmatched",
+            border_style="green" if linked_count == len(checks) else "yellow",
+        )
     )
 
 

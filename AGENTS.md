@@ -8,14 +8,14 @@ tags: [core, infrastructure, linter]
 
 ## 1. System Overview
 
-This repository contains the core implementation of the OmniAtlas Linter toolchain (`omni-atlas`). The project is a lightweight, high-performance static analysis CLI designed to enforce the OmniAtlas Meta-Specification (`BLUEPRINT.md`). It prevents documentation rot and model hallucination by dynamically validating symbol-level anchors against the project's actual Abstract Syntax Tree (AST) using incremental Git analysis.
+This repository contains the core implementation of the OmniAtlas Linter toolchain (`omni-atlas`). The project is a lightweight, high-performance static analysis CLI designed to enforce the OmniAtlas Meta-Specification (`BLUEPRINT.md`). It prevents documentation rot and model hallucination by dynamically validating symbol-level anchors against the project's actual Abstract Syntax Tree (AST) using incremental Git analysis, and links frontend API calls to their backend handlers (API_CALL edges) across Python/TypeScript/Go/Rust/C++ and HTML.
 
 ## 2. Technology Stack & Rationale
 
 * **Runtime:** Python 3.12 (Selected for optimal stability, robust type-hinting features, and mature pre-compiled binary wheel support for C-extensions).
 * **Package Management:** `uv` (Fast, reliable, rust-backed project initialization and dependency management).
 * **CLI Framework:** `typer` (Type-hint driven command-line interface generation).
-* **AST Parser Engine:** `tree-sitter` & `tree-sitter-python` (C-optimized, highly incremental syntax tree parser ensuring microsecond-level symbol verification and fault-tolerant parsing).
+* **AST Parser Engine:** `tree-sitter` with Python, TypeScript/JavaScript, Go, Rust and C/C++ grammar packs (C-optimized, incremental syntax trees for fault-tolerant multi-language symbol verification).
 * **Terminal UI:** `rich` (For high-fidelity, aesthetic terminal reporting and structural error visualization).
 
 ## 3. Global Architecture & Directory Topology
@@ -24,15 +24,22 @@ This repository contains the core implementation of the OmniAtlas Linter toolcha
 omni-atlas/
 ├── BLUEPRINT.md          # Supreme framework meta-specification (Immutable Rule)
 ├── AGENTS.md             # This file (Global project architecture panorama)
+├── .omni-atlas.toml      # Project config: custom SCM query extensions
 ├── pyproject.toml        # Project metadata and uv dependency locks
+├── tests/                # Pytest suite & multi-language fixtures
 └── src/
     ├── main.py           # CLI Entrypoint & command routing (Typer)
     ├── core/
     │   ├── git_provider.py # Incremental Git diff scanning engine
-    │   ├── parser.py       # Markdown anchor extraction & Tree-sitter AST parsing
-    │   └── linter.py       # Core double-verification engine (Collision logic)
-    └── utils/
-        └── reporter.py     # Rich-text console output formatting & error stack display
+    │   ├── parser.py       # Markdown anchors + multi-language Tree-sitter registry
+    │   ├── linker.py       # Frontend/backend API call matcher (API_CALL edges)
+    │   ├── linter.py       # Core double-verification engine (Collision logic)
+    │   ├── config.py       # .omni-atlas.toml loader (custom_scm validation)
+    │   ├── installer.py    # Pre-commit hook installer (`omni-atlas init`)
+    │   ├── graph.py        # Topology DAG builder & Cytoscape converter
+    │   └── server.py       # Zero-dependency dashboard server (SSE, APIs, IDE links)
+    └── ui/
+        └── index.html      # Single-file Cytoscape topology dashboard
 
 ```
 

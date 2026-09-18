@@ -24,7 +24,13 @@ from core.git_provider import GitProvider, StagedChanges
 from core.graph import TopologyGraphBuilder
 from core.installer import HookInstaller, InstallResult
 from core.linter import AnchorCheck, ApiCheck, LinterEngine, SyncCheck, TokenCheck
-from core.mcp import McpServer
+from core.mcp import (
+    CLIENT_TARGETS,
+    McpServer,
+    build_client_config,
+    client_config_path,
+    merge_client_config,
+)
 from core.server import AtlasWebServer, is_headless_environment
 
 VERSION = "0.0.1"
@@ -208,6 +214,62 @@ def graph(
         "Use [bold]--json[/bold] for the full Cytoscape payload.",
     ]
     console.print(Panel("\n".join(lines), title="OmniAtlas Topology", border_style="green"))
+    raise typer.Exit(code=0)
+
+
+@app.command()
+def init_mcp(
+    target: str = typer.Option(
+        "cursor", "--target", "-t",
+        help="Client flavour: cursor (.cursor/mcp.json) or claude (desktop config).",
+    ),
+    workspace: str = typer.Option(
+        None, "--workspace", "-w",
+        help="Workspace root to analyze (default: current directory).",
+    ),
+    write: bool = typer.Option(
+        False, "--write", help="Merge into the client config file (preserves other servers).",
+    ),
+    out: str = typer.Option(
+        None, "--out", help="Override the destination path used with --write.",
+    ),
+) -> None:
+    """Generate (or install) the MCP client configuration for this workspace."""
+    if target not in CLIENT_TARGETS:
+        text = Text("✖ Error: ", style="bold red")
+        text.append(
+            f"unknown target '{target}' — expected one of {', '.join(CLIENT_TARGETS)}",
+            style="red",
+        )
+        console.print(text)
+        raise typer.Exit(code=1)
+
+    workspace_path = Path(workspace).resolve() if workspace else Path.cwd()
+    config = build_client_config(target, workspace_path)
+    entry = config["mcpServers"]["omni-atlas"]
+
+    if not write:
+        print(json.dumps(config, ensure_ascii=False, indent=2))
+        raise typer.Exit(code=0)
+
+    destination = Path(out).resolve() if out else client_config_path(target, workspace_path)
+    try:
+        merge_client_config(destination, entry)
+    except ValueError as exc:
+        text = Text("✖ Error: ", style="bold red")
+        text.append(str(exc), style="red")
+        console.print(text)
+        raise typer.Exit(code=1)
+
+    body = (
+        f"✔ MCP server registered for [bold]{target}[/bold]\n"
+        f"  Config: [cyan]{destination}[/cyan]\n"
+        f"  Command: [cyan]{entry['command']} {' '.join(entry['args'])}[/cyan]\n"
+        f"  Workspace: [cyan]{entry['cwd']}[/cyan]\n\n"
+        "Other MCP servers in that file were preserved. Restart the client "
+        "to pick up the new server."
+    )
+    console.print(Panel(body, title="OmniAtlas MCP Configured", border_style="green"))
     raise typer.Exit(code=0)
 
 

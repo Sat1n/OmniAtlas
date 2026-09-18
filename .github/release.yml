@@ -1,0 +1,14 @@
+# Native GitHub release-notes categorization (used by generate_release_notes).
+# Pull requests are grouped by label; unlabeled changes fall under "Other Changes".
+changelog:
+  categories:
+    - title: 🚀 Features
+      labels: ["feature", "feat", "enhancement"]
+    - title: 🐛 Fixes
+      labels: ["fix", "bug", "bugfix"]
+    - title: 📚 Documentation
+      labels: ["docs", "documentation"]
+    - title: 🧹 Chores
+      labels: ["chore", "ci", "build", "refactor", "test"]
+    - title: Other Changes
+      labels: ["*"]

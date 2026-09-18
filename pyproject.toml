@@ -30,10 +30,11 @@ packages = ["src/core", "src/main.py"]
 "src/ui" = "ui"
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = [".", "src"]
 testpaths = ["tests"]
 
 [dependency-groups]
 dev = [
+    "pyinstaller>=6.22.3",
     "pytest>=9.1.1",
 ]

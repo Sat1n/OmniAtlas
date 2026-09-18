@@ -1,0 +1,112 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.asset }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: omni-atlas-linux-x64
+          - os: macos-14
+            asset: omni-atlas-macos-arm64
+          - os: windows-latest
+            asset: omni-atlas-win-x64.exe
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build one-file binary
+        run: uv run python scripts/build.py
+
+      - name: Smoke-test the binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="dist/${{ matrix.asset }}"
+          "$BIN" --help > /dev/null
+          "$BIN" doctor | head -5
+          "$BIN" init-mcp --target cursor | head -3
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all platform binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate categorized changelog from commits
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          git fetch --tags --force >/dev/null 2>&1 || true
+          PREV="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+          if [ -n "$PREV" ]; then
+            RANGE="${PREV}..${TAG}"
+          else
+            RANGE="${TAG}"   # first release: categorize the full history
+          fi
+          echo "changelog range: ${RANGE}"
+          {
+            echo "## What's Changed"
+            echo ""
+            for entry in \
+              "feat:🚀 Features" \
+              "fix:🐛 Fixes" \
+              "refactor:♻️ Refactors" \
+              "test:🧪 Tests" \
+              "ci:🤖 CI" \
+              "build:📦 Build" \
+              "chore:🧹 Chore" \
+              "docs:📚 Documentation" \
+              "style:💅 Style"; do
+              prefix="${entry%%:*}"
+              title="${entry#*:}"
+              commits=$(git log --pretty=format:"- %s (%h)" "$RANGE" \
+                | grep -E "^- ${prefix}(\(|:)" || true)
+              if [ -n "$commits" ]; then
+                echo "### ${title}"
+                echo "$commits"
+                echo ""
+              fi
+            done
+          } > CHANGELOG_BODY.md
+          cat CHANGELOG_BODY.md
+
+      - name: Publish release with binaries
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body_path: CHANGELOG_BODY.md
+          append_body: true
+          files: dist/*
+          fail_on_unmatched_files: true

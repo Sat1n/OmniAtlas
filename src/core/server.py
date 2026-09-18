@@ -34,9 +34,24 @@ from pathlib import Path
 from core.git_provider import GitProvider
 from core.graph import TopologyGraphBuilder
 
+def _ui_dir() -> Path:
+    """Locate the frontend assets for both source and frozen runtimes.
+
+    PyInstaller one-file binaries unpack bundled data to ``sys._MEIPASS``
+    at startup; an editable checkout / installed wheel keeps ``ui`` next
+    to the ``core`` package.
+
+    @shape return: Path (directory containing index.html)
+    """
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        return Path(meipass) / "ui"
+    return Path(__file__).resolve().parent.parent / "ui"
+
+
 #: Frontend assets live next to the ``core`` package (editable checkout
 #: and installed wheel share this relative layout).
-UI_DIR = Path(__file__).resolve().parent.parent / "ui"
+UI_DIR = _ui_dir()
 
 #: Poll cadence for the file watcher (seconds) — keeps updates sub-second.
 _WATCH_INTERVAL = 0.8

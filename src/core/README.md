@@ -69,13 +69,28 @@ the Git staging area — full-repository scans are architecturally forbidden.
 * Stdio JSON-RPC MCP server: [McpServer](src/core/mcp.py#class:McpServer)
 * Agent tool implementations: [ArchitectureTools](src/core/mcp.py#class:ArchitectureTools)
 * Tool catalogue: [TOOL_SPECS](src/core/mcp.py#var:TOOL_SPECS)
+* Client config entry (runtime detection): [mcp_server_entry](src/core/mcp.py#function:mcp_server_entry)
+* Client config document builder: [build_client_config](src/core/mcp.py#function:build_client_config)
+* Safe config merge (preserves siblings): [merge_client_config](src/core/mcp.py#function:merge_client_config)
 
 The MCP server exposes ``get_architectural_context`` (suppliers/consumers/
 API mappings/doc anchors for a file), ``check_doc_sync`` (structured
 linter report with fix hints), ``query_topology`` (keyword search) and
 ``diagnose_workspace`` (parse health, skipped files, unmatched API) to
 AI coding agents. ``omni-atlas check --json`` and ``omni-atlas graph
---json`` provide the same headless contract on the shell.
+--json`` provide the same headless contract on the shell, and
+``omni-atlas init-mcp`` generates (or merges, with ``--write``) the
+client configuration for Cursor and Claude Desktop.
+
+### Distribution (`scripts/build.py` + `.github/workflows/release.yml`)
+
+``omni-atlas ui`` resolves its static assets through
+[sys._MEIPASS](src/core/server.py#function:_ui_dir) when running as a
+PyInstaller one-file binary. ``python scripts/build.py`` bundles the
+CLI, the dashboard and every Tree-sitter C-extension into
+``omni-atlas-<os>-<arch>``; pushing a ``v*`` tag runs the GitHub
+Actions matrix (Linux/macOS/Windows), generates a categorized changelog
+from commit prefixes and attaches all binaries to the release.
 
 ### Diagnostics & Health (`diagnostics.py`)
 

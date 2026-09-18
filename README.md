@@ -1,52 +1,94 @@
+---
+id: omni_atlas_readme
+type: interface
+inputs: []
+outputs: []
+tags: [docs, cli, mcp, visualization]
+---
+
 # OmniAtlas 🌍
 
-> **Universal Knowledge Mapping & Navigation Framework for Humans and AI Agents.**
+> **Code topology & AST dependency graph, out of the box.**
 
 [English] | [简体中文](README_ZH.md)
 
----
+OmniAtlas is an open-source static-analysis toolchain that keeps
+documentation and code in lockstep, then renders the whole project as an
+interactive dependency graph for humans and AI agents.
 
-## 💡 What is OmniAtlas?
+* **Lightweight web dashboard** — `omni-atlas ui` serves a single-file
+  Cytoscape topology (docs, files, symbols, I/O nodes, cross-language
+  API calls) with live SSE updates from a zero-dependency stdlib server.
+* **Full rule validation** — `omni-atlas check` verifies symbol-level
+  Markdown anchors against the real Tree-sitter AST, enforces fatal
+  doc-sync and token budgets, and audits frontend ➔ backend API links.
+* **Native MCP service** — `omni-atlas mcp` speaks the Anthropic Model
+  Context Protocol, letting coding agents query architecture, doc sync
+  and diagnostics directly.
 
-As AI Agents transition into complex, real-world applications—whether navigating tens of thousands of lines of code, tracing corporate financial pipelines, or retrieving semantic context from massive heterogeneous datasets—we face critical systemic bottlenecks: **Context Fragmentation**, **Long-Context Forgetting (Lost in the Middle)**, and **massive token wastage caused by blind file wandering/traversal**.
+## ✨ Features
 
-**OmniAtlas** is a lightweight, open-source knowledge organization specification and toolchain. It does not bind you to any proprietary platform or introduce heavy graph databases. Instead, using standard **Markdown relative links** and **structured YAML frontmatter**, it implicitly weaves isolated resources—source code, invoices, asset vouchers, or business docs—into a highly efficient **Knowledge Mesh**.
+* **Zero-dependency single binary** — UI assets and 7+ Tree-sitter C
+  extensions (Python, TypeScript/JS, Go, Rust, C, C++, HTML) are
+  embedded; no Python runtime required.
+* **Native MCP integration** — one command wires OmniAtlas into Cursor
+  or Claude Desktop (`init-mcp`), merging configs safely.
+* **Incremental & private** — Git-diff-scoped checks, a deduplicated
+  ring-buffer watcher (mtime + git state), and automatic path
+  sanitization so reports never leak user directories.
+* **Multi-language API linking** — `fetch`/axios/EventSource calls are
+  matched to FastAPI/Flask/Gin/stdlib routes as `API_CALL` edges.
+* **Custom SCM queries** — extend symbol extraction via
+  `.omni-atlas.toml` with inline or file-based Tree-sitter queries.
+* **Snapshots & focus** — export SVG/PNG/JSON, import snapshots for
+  offline diffing, isolate dependency cones in the dashboard.
 
-Designed as a shared *lingua franca* for both humans and AI Agents, OmniAtlas equips small language models (such as 8B/70B parameter variants) with a high-definition, lightweight "GPS map," allowing them to instantly locate and stream-consume any localized context in massive projects.
+## 🚀 Quick Start
 
----
+```bash
+uv tool install omni-atlas
+# or
+pip install omni-atlas
+```
 
-## 🎯 Core Design Goals
+Single-file binaries (no Python needed) are published on the
+[GitHub Releases](https://github.com/Sat1n/OmniAtlas/releases) page for
+Linux x64, macOS arm64 and Windows x64 — download, `chmod +x`, run.
 
-* **Clean & Intuitive (Detail Hiding)**: High-level documentation focuses strictly on abstraction and connectivity, offloading all raw implementation details back to the physical source files.
-* **Extreme Token Efficiency**: Enforces strict token and character ceilings for each documentation layer, enabling progressive chunk-based consumption tailored for smaller LLMs.
-* **High-Cohesion, Clone-and-Go**: The entire meta-specification operates through a single config blueprint that serves as the Agent's code of conduct and native skill, enabling drop-in replication for any new project.
-* **Bi-Directional Transparency**: Human developers can instantly audit data flows and logical topologies, while AI Agent behaviors and operations become completely observable to humans.
+## 🤖 MCP Integration
 
----
+```bash
+omni-atlas init-mcp --target cursor --write
+omni-atlas init-mcp --target claude --write
+```
 
-## 🗺️ Navigation Architecture: Progressive Zoom Levels
+`--write` merges into `.cursor/mcp.json` or the Claude Desktop config
+while preserving other MCP servers; without it the JSON is printed to
+stdout. Four agent tools are exposed: `get_architectural_context`,
+`check_doc_sync`, `query_topology` and `diagnose_workspace`.
 
-OmniAtlas utilizes a rigorous layered abstraction design, allowing multi-tiered zooming just like a high-precision satellite map:
+## 🧭 CLI Cheatsheet
 
-* **`BLUEPRINT.md` (Meta-Specification)**: The constitution and operational standard of the project. It explicitly defines the documentation layers (L1, L2, L3), naming conventions, and link-graph protocols.
-* **L1 — `AGENTS.md` (Global Panorama - Root)**: High-level system architecture, core technology/business domains, hard constraints, and foundational design rationales.
-* **L2 — `README.md` (Sub-domain Index - Sub-folder)**: They define the architecture of specific modules and link downward progressively to prevent document bloat.
-* **L3 — Node-Level Detail (Source Files & Comments)**: Deep dive into physical source files. Specialized entities (e.g., deep learning custom environments, complex functional pipelines) must explicitly document input/output shapes, upstream dependencies, and exact semantic definitions.
+| Command | Purpose |
+|---|---|
+| `omni-atlas check --all` | Full-repo dependency & rule validation (CI mode) |
+| `omni-atlas ui` | Launch the local topology dashboard |
+| `omni-atlas doctor` | Diagnose environment & Tree-sitter C extensions |
+| `omni-atlas mcp` | Run the MCP server (stdio JSON-RPC) |
+| `omni-atlas graph --json` | Export the topology as machine-readable JSON |
+| `omni-atlas report-bug` | Sanitized Markdown/JSON diagnostic report |
 
----
+## 🗺️ Documentation Map
 
-## 🛠️ The Engineering Trio: Eradicating "Documentation Rot"
+* `BLUEPRINT.md` — the meta-specification (L1/L2/L3 zoom rules).
+* `AGENTS.md` — global architecture panorama.
+* `src/core/README.md` — core module index (L2).
+* `tests/` — pytest suite and multi-language fixtures.
 
-To ensure the architecture remains production-grade, OmniAtlas provides an automation CLI built around three core mechanisms:
+## 🛠️ Development
 
-1. **Documentation Linter (Anti-Rot Checking)**: A lightweight static analysis tool that runs in CI/CD or pre-commit hooks. It guarantees link integrity and ensures entity/signature updates stay synchronized, strictly blocking outdated documentation from misleading the Agent.
-2. **Symbol-Level Precision Anchoring**: Supports precise anchor protocols such as `[Auth Node](src/auth.py#class:AuthManager)`. By leveraging Abstract Syntax Trees (AST), the downstream tool chain anchors the Agent directly to the exact lines of code, eliminating token-heavy file scanning.
-3. **Incremental Update Protocol**: Utilizes clear Markdown comment blocks (e.g., ``) to demarcate atomic sections. Agents perform append-only or block-replace routines, keeping the map updated without rewriting entire files—drastically reducing small model hallucinations.
-
----
-
-## 🔮 Future Evolution
-
-* 📊 **Automated Data Flow Visualization**: Automatically rendering end-to-end Data Lineage Graphs compiled straight from YAML frontmatter tags.
-* 🕵️‍♂️ **"Librarian" Agent**: A dedicated, ultra-lightweight routing agent that traces dependency pipelines and call-chains instantly using only the OmniAtlas mesh, without ever reading the heavy underlying source files.
+```bash
+uv sync                    # install with dev dependencies
+uv run pytest              # run the test suite
+python scripts/build.py    # one-file binary for the current platform
+```

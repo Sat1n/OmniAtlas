@@ -15,8 +15,10 @@ Implements the bidirectional collision check plus the token guard:
 from dataclasses import dataclass
 from pathlib import Path
 
-from core.git_provider import IGNORED_DIRS, StagedChanges
+from core.git_provider import IGNORED_DIRS, GitProvider, StagedChanges
+from core.linker import FRONTEND_EXTENSIONS, ApiLinker
 from core.parser import (
+    LanguageRegistry,
     MarkdownParser,
     PythonASTParser,
     SymbolAnchor,
@@ -64,6 +66,18 @@ class TokenCheck:
         return self.tokens <= self.limit
 
 
+@dataclass
+class ApiCheck:
+    """Cross-language link audit for one frontend API call."""
+
+    source_file: str
+    method: str
+    path: str
+    matched: bool
+    target_file: str = ""
+    target_symbol: str = ""
+
+
 class LinterEngine:
     """Orchestrates the bidirectional collision check and token guard."""
 
@@ -71,6 +85,8 @@ class LinterEngine:
         self._root = Path(repo_root)
         self._md_parser = MarkdownParser()
         self._ast_parser = PythonASTParser()
+        self._registry = LanguageRegistry()
+        self._linker = ApiLinker(self._registry)
 
     def check_anchors(self, doc_files: list[str]) -> list[AnchorCheck]:
         """Forward check: resolve every anchor of staged docs in the AST.
@@ -129,6 +145,51 @@ class LinterEngine:
             level = "L1" if Path(doc).parent == Path(".") else "L2"
             limit = L1_TOKEN_LIMIT if level == "L1" else L2_TOKEN_LIMIT
             checks.append(TokenCheck(doc, level, parsed.estimate_tokens(), limit))
+        return checks
+
+    def check_api_links(self, staged: StagedChanges) -> list[ApiCheck]:
+        """Audit staged frontend calls against backend routes (informational).
+
+        Parses every project code file through :class:`core.linker.ApiLinker`
+        and reports each endpoint declared by a *staged* frontend file as
+        linked or unmatched. Results are advisory — they never change the
+        process exit code.
+
+        @shape return: list[ApiCheck]
+        @source links: core/linker.py#function:build_links
+        """
+        frontend = sorted({
+            f for f in staged.code_files
+            if Path(f).suffix.lower() in FRONTEND_EXTENSIONS
+        })
+        if not frontend:
+            return []
+        all_files = GitProvider().collect_all_files(self._root).code_files
+        links = self._linker.build_links(all_files, self._root)
+        checks: list[ApiCheck] = []
+        seen: set[tuple[str, str, str]] = set()
+        for file in frontend:
+            for method, url in self._registry.parse_file(file).endpoints:
+                normalized = ApiLinker._normalize(url)
+                key = (file, method, url)
+                if key in seen:
+                    continue
+                seen.add(key)
+                link = next(
+                    (l for l in links
+                     if l.source_file == file and l.path == normalized),
+                    None,
+                )
+                checks.append(
+                    ApiCheck(
+                        source_file=file,
+                        method=method,
+                        path=url,
+                        matched=link is not None,
+                        target_file=link.target_file if link else "",
+                        target_symbol=link.target_symbol if link else "",
+                    )
+                )
         return checks
 
     def _discover_markdown_docs(self) -> list[Path]:

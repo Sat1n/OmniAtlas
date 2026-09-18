@@ -18,7 +18,16 @@ from rich.text import Text
 console = Console()
 
 #: Directories never scanned for project files (shared with ``linter.py``).
-IGNORED_DIRS = {".git", ".venv", "node_modules", "__pycache__"}
+#: ``vendor`` holds third-party bundles (cytoscape, marked, dagre) that
+#: are shipped, not analyzed.
+IGNORED_DIRS = {".git", ".venv", "node_modules", "__pycache__", "vendor"}
+
+#: Code extensions in the analysis universe — Python plus the
+#: multi-language set (TS/JS, Go, Rust, C/C++) and frontend HTML.
+CODE_EXTENSIONS = {
+    ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs",
+    ".c", ".cc", ".cpp", ".h", ".hpp", ".html",
+}
 
 
 @dataclass
@@ -80,7 +89,7 @@ class GitProvider:
             path = line.strip()
             if not path:
                 continue
-            if path.endswith(".py"):
+            if Path(path).suffix in CODE_EXTENSIONS:
                 changes.code_files.append(path)
             elif path.endswith(".md"):
                 changes.doc_files.append(path)
@@ -107,7 +116,7 @@ class GitProvider:
                 for part in path.parts
             ):
                 continue
-            if path.suffix == ".py":
+            if path.suffix in CODE_EXTENSIONS:
                 changes.code_files.append(path.as_posix())
             elif path.suffix == ".md":
                 changes.doc_files.append(path.as_posix())

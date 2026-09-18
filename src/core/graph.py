@@ -33,8 +33,10 @@ import re
 from pathlib import Path
 from typing import Any
 
+from core.config import load_config
 from core.git_provider import GitProvider
-from core.parser import MarkdownParser, PythonASTParser
+from core.linker import ApiLinker
+from core.parser import LanguageRegistry, MarkdownParser, PythonASTParser
 
 NODE_PASS = "PASS"
 NODE_MODIFIED = "MODIFIED"
@@ -76,6 +78,9 @@ class TopologyGraphBuilder:
         self._git = GitProvider()
         self._md_parser = MarkdownParser()
         self._ast_parser = PythonASTParser()
+        self._registry = LanguageRegistry()
+        self._registry.load_custom_scm(load_config(repo_root).custom_scm)
+        self._linker = ApiLinker(self._registry)
         self._nodes: dict[str, dict[str, Any]] = {}
         self._edges: dict[tuple[str, str, str], None] = {}
         self._id_map: dict[str, str] = {}  # frontmatter id -> node id
@@ -100,6 +105,8 @@ class TopologyGraphBuilder:
         for doc in docs:
             self._add_anchor_edges(doc, parsed[doc])
         self._add_source_edges()
+        self._add_multilang_nodes()
+        self._add_api_links()
         self._overlay_statuses()
         self._add_blueprint_group()
         return self
@@ -382,6 +389,118 @@ class TopologyGraphBuilder:
             }
         return None
 
+    def _add_multilang_nodes(self) -> None:
+        """Register non-Python sources: symbols, imports and API facts.
+
+        Every multi-language file (TS/JS, Go, Rust, C/C++, HTML) becomes a
+        file node with ``contains`` edges to its extracted symbols and
+        resolvable ``import`` edges to local dependency files. Frontend/
+        backend API facts are stashed in the file node's meta for the
+        drawer.
+
+        @source facts: src/core/parser.py#function:parse_file
+        """
+        changes = self._git.collect_all_files(self._root)
+        files = [f for f in changes.code_files if Path(f).suffix != ".py"]
+        for path in files:
+            facts = self._registry.parse_file(path)
+            if (
+                not facts.symbols
+                and not facts.imports
+                and not facts.endpoints
+                and not facts.routes
+            ):
+                continue
+            file_id = self._ensure_file_node(path)
+            node = self._nodes[file_id]
+            node["language"] = facts.language
+            if facts.imports:
+                node["meta"]["imports"] = facts.imports
+            if facts.endpoints:
+                node["meta"]["endpoints"] = list(dict.fromkeys(
+                    f"{method} {url}" for method, url in facts.endpoints
+                ))
+            if facts.routes:
+                node["meta"]["routes"] = list(dict.fromkeys(
+                    f"{method} {route}" for method, route, _ in facts.routes
+                ))
+            for symbol in facts.symbols:
+                symbol_id = f"{path}#{symbol.kind}:{symbol.name}"
+                self._add_node(
+                    symbol_id,
+                    label=symbol.name,
+                    kind=symbol.kind,
+                    path=path,
+                    meta={"line": symbol.line},
+                )
+                self._add_edge(file_id, symbol_id, "contains")
+            for target in facts.imports:
+                resolved = self._resolve_import(path, target)
+                if resolved:
+                    self._add_edge(file_id, self._ensure_file_node(resolved), "import")
+
+    def _resolve_import(self, source_file: str, target: str) -> str | None:
+        """Resolve a local import/include to a repository file node id.
+
+        Relative TS/JS imports (``./util``) and quoted C/C++ includes
+        (``"util.h"``) are probed with common extensions and ``index``
+        fallbacks; bare modules and ``<system>`` headers stay external.
+
+        @shape return: str | None (file node id)
+        """
+        if not target.startswith("."):
+            return None
+        base = self._root / Path(source_file).parent / target
+        candidates = [base]
+        for ext in (".ts", ".tsx", ".js", ".jsx", ".h", ".hpp", ".c", ".cc", ".cpp"):
+            candidates.append(Path(str(base) + ext))
+        for index_name in ("index.ts", "index.tsx", "index.js", "index.jsx"):
+            candidates.append(base / index_name)
+        for candidate in candidates:
+            try:
+                if candidate.is_file():
+                    return candidate.resolve().relative_to(self._root.resolve()).as_posix()
+            except (OSError, ValueError):
+                continue
+        return None
+
+    def _add_api_links(self) -> None:
+        """Wire frontend fetch/axios calls to matching backend routes.
+
+        Emits dashed cross-language ``api`` edges: frontend file node ->
+        backend handler symbol (or file node when the handler is not a
+        standalone symbol).
+
+        @source links: src/core/linker.py#class:ApiLinker
+        """
+        changes = self._git.collect_all_files(self._root)
+        links = self._linker.build_links(list(changes.code_files), self._root)
+        for link in links:
+            source_id = self._ensure_file_node(link.source_file)
+            target_id = self._ensure_backend_symbol(link.target_symbol_id, link.target_file)
+            if source_id and target_id:
+                self._add_edge(source_id, target_id, "api")
+
+    def _ensure_backend_symbol(self, symbol_id: str, file_path: str) -> str | None:
+        """Return the backend handler symbol node, minting it if needed."""
+        if symbol_id in self._nodes:
+            return symbol_id
+        if Path(file_path).suffix == ".py":
+            _, _, rest = symbol_id.partition("#")
+            symbol_type, _, symbol_name = rest.partition(":")
+            lookup = self._ast_parser.lookup(file_path, symbol_type, symbol_name)
+            if lookup.found:
+                self._add_node(
+                    symbol_id,
+                    label=symbol_name,
+                    kind=symbol_type,
+                    path=file_path,
+                    meta={"line": lookup.line},
+                )
+                self._add_edge(self._ensure_file_node(file_path), symbol_id, "contains")
+                return symbol_id
+        return self._ensure_file_node(file_path) if file_path else None
+
     def _overlay_statuses(self) -> None:
         """Stamp PASS / MODIFIED / STALE onto every node from the Git state."""
         modified = set(self._git.collect_modified_files(self._root))
@@ -389,7 +508,9 @@ class TopologyGraphBuilder:
         modified_code: set[str] = set()
         for node in self._nodes.values():
             path = node.get("path")
-            if path in modified and node["kind"] in ("class", "function", "var"):
+            if path in modified and node["kind"] in (
+                "class", "function", "var", "struct", "enum", "method", "interface",
+            ):
                 modified_code.add(path)
 
         for node in self._nodes.values():

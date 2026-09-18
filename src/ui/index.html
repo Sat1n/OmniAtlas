@@ -239,6 +239,8 @@
   #legend .diamond { transform: rotate(45deg) scale(.8); }
   #legend .hex { clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); }
   #legend .rhomboid { transform: skewX(-18deg); }
+  #legend .octagon { clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%); }
+  #legend .api-line { height: 0; border-top: 2px dashed #fab387; background: none; }
   #legend .group-title {
     font-size: 10.5px;
     text-transform: uppercase;
@@ -566,6 +568,8 @@
     <div class="row"><span class="swatch rhomboid" style="background:#89dceb"></span> ⬇ Input Node</div>
     <div class="row"><svg class="swatch-svg" width="22" height="18" viewBox="0 0 22 18"><polygon points="2,2 14,2 20,9 14,16 2,16" fill="#f5c2e7"/></svg> ⬆ Output Node</div>
     <div class="row"><svg class="swatch-svg" width="22" height="18" viewBox="0 0 22 18"><polygon points="2,2 14,2 20,9 14,16 2,16" fill="#1e1e2e" stroke="#a6e3a1" stroke-width="1.5"/></svg> $&gt; CLI / Env Command</div>
+    <div class="row"><span class="swatch octagon" style="background:var(--external)"></span> Struct / Enum (Go·Rust·C++)</div>
+    <div class="row"><span class="swatch api-line"></span> API Call (FE → BE)</div>
     <div class="row"><span class="swatch rect" style="background:rgba(178,190,195,.12); border:1px dashed #313244"></span> Top Docs Group</div>
     <hr>
     <div class="group-title">Sync Status</div>
@@ -608,7 +612,11 @@ const KIND_SHAPE = {
   file: "barrel",
   class: "ellipse",
   function: "diamond",
+  method: "diamond",
   var: "diamond",
+  struct: "octagon",
+  enum: "round-diamond",
+  interface: "octagon",
   external: "cut-rectangle",
   external_cli: "round-tag",
   group: "roundrectangle",
@@ -757,6 +765,21 @@ const CY_STYLE = [
   {
     selector: "edge[kind = 'contains']",
     style: { "line-color": "#45525f", "target-arrow-color": "#45525f", "line-style": "solid", width: 1.4 },
+  },
+  {
+    selector: "edge[kind = 'import']",
+    style: { "line-color": "#7aa2f7", "target-arrow-color": "#7aa2f7", "line-style": "dotted", width: 1.3 },
+  },
+  {
+    selector: "edge[kind = 'api']",
+    style: {
+      "line-color": "#fab387",
+      "target-arrow-color": "#fab387",
+      "line-style": "dashed",
+      "target-arrow-shape": "triangle",
+      "arrow-scale": 1.1,
+      width: 2,
+    },
   },
   {
     selector: "edge[kind = 'source']",
@@ -1011,7 +1034,7 @@ document.getElementById("focus-reset").addEventListener("click", () => { exitFoc
 // graph — update in place, add/remove only the delta — so zoom/pan and
 // the physics layout survive every SSE tick untouched.
 const NODE_FIELDS = [
-  "kind", "label", "status", "direction", "parent",
+  "kind", "label", "status", "direction", "parent", "language",
   "absolute_path", "line_number", "full_label", "full_command", "cli_proto",
 ];
 
@@ -1127,6 +1150,13 @@ function openDrawer(node) {
       parts.push(field("Dependent Symbol", `<ul class="tags">${rows.join("")}</ul>`));
     }
   }
+
+  if (meta.imports && meta.imports.length)
+    parts.push(field("Imports / Includes", `<ul class="tags">${meta.imports.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>`));
+  if (meta.endpoints && meta.endpoints.length)
+    parts.push(field("API Calls (frontend)", `<ul class="tags">${meta.endpoints.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>`));
+  if (meta.routes && meta.routes.length)
+    parts.push(field("API Routes (backend)", `<ul class="tags">${meta.routes.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>`));
 
   if (d.path) {
     const abs = d.absolute_path || d.path;

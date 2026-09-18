@@ -1,0 +1,28 @@
+# OmniAtlas project configuration.
+#
+# Custom SCM queries extend the built-in multi-language symbol extraction
+# (TypeScript/JavaScript, Go, Rust, C/C++) with project- or
+# framework-specific rules.
+#
+# Each [[custom_scm]] entry targets a registered grammar language
+# (python, typescript, tsx, go, rust, c, cpp) and supplies either an
+# inline `query` string or a `path` pointing at a .scm file. Captures
+# named @symbol become graph symbol nodes, grouped under the entry's
+# `name` (shown as the node kind).
+#
+# Invalid queries are skipped with a warning — base AST parsing is
+# never affected.
+#
+# Example: surface Go interfaces as first-class symbols.
+#
+# [[custom_scm]]
+# language = "go"
+# name = "interface"
+# query = "(type_spec name: (type_identifier) @symbol type: (interface_type))"
+#
+# Example: load a query from a file (relative to the repository root).
+#
+# [[custom_scm]]
+# language = "rust"
+# name = "trait"
+# path = "queries/rust_traits.scm"

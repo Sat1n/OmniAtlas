@@ -17,8 +17,10 @@ the Git staging area — full-repository scans are architecturally forbidden.
 | File | Responsibility |
 |---|---|
 | `git_provider.py` | Incremental Git diff scanning engine (staging area collection) |
-| `parser.py` | Markdown anchor extraction, frontmatter parsing, block-safe excerpts & Tree-sitter AST symbol verification |
-| `linter.py` | Bidirectional collision check & token budget guard |
+| `parser.py` | Markdown anchor extraction, frontmatter parsing, block-safe excerpts, Tree-sitter AST verification & multi-language parser registry (TS/JS, Go, Rust, C/C++) |
+| `linter.py` | Bidirectional collision check, token budget guard & informational cross-language API audit |
+| `linker.py` | Frontend fetch/axios calls ➔ backend route matcher (Python/Go) producing `api` edges |
+| `config.py` | `.omni-atlas.toml` loader with fault-tolerant `[[custom_scm]]` query validation |
 | `installer.py` | One-shot pre-commit hook installer (`omni-atlas init`) |
 | `graph.py` | Topology DAG builder, Cytoscape converter & compound container grouping |
 | `server.py` | Zero-dependency stdlib web server: dashboard, SSE change stream (`/api/events`), editor launch (`POST /api/open-in-editor`) & IDE detection (`/api/ides`) |
@@ -37,6 +39,8 @@ the Git staging area — full-repository scans are architecturally forbidden.
 
 * Markdown frontmatter & anchor extractor: [MarkdownParser](src/core/parser.py#class:MarkdownParser)
 * Tree-sitter AST symbol engine: [PythonASTParser](src/core/parser.py#class:PythonASTParser)
+* Multi-language registry: [LanguageRegistry](src/core/parser.py#class:LanguageRegistry)
+* Unified per-file extraction: [parse_file](src/core/parser.py#function:parse_file)
 * Block-safe excerpt extractor: [excerpt](src/core/parser.py#function:excerpt)
 * Extracted anchor record: [SymbolAnchor](src/core/parser.py#class:SymbolAnchor)
 * Parsed document record: [MarkdownDoc](src/core/parser.py#class:MarkdownDoc)
@@ -46,6 +50,17 @@ the Git staging area — full-repository scans are architecturally forbidden.
 * Bidirectional collision orchestrator: [LinterEngine](src/core/linter.py#class:LinterEngine)
 * Reverse sync record: [SyncCheck](src/core/linter.py#class:SyncCheck)
 * Token budget record: [TokenCheck](src/core/linter.py#class:TokenCheck)
+* Cross-language API audit record: [ApiCheck](src/core/linter.py#class:ApiCheck)
+
+### Cross-Language Linker (`linker.py`)
+
+* Frontend/backend call matcher: [ApiLinker](src/core/linker.py#class:ApiLinker)
+* Link assembly entrypoint: [build_links](src/core/linker.py#function:build_links)
+
+### Project Configuration (`config.py`)
+
+* Fault-tolerant config loader: [load_config](src/core/config.py#function:load_config)
+* Custom SCM entry record: [CustomScm](src/core/config.py#class:CustomScm)
 
 ### Hook Installer (`installer.py`)
 
@@ -119,4 +134,6 @@ flashes the nodes whose status changed. ``/api/ides`` also reports
 [omni-atlas ui] ──> [AtlasWebServer] ──(/api/topology + static HTML)──> [Browser Dashboard]
 [File Saves] ──> [_RepoWatcher] ──(SSE graph_update + changed paths)──> [Browser auto-refresh]
 [/api/ides] ──> [detect_installed_ides] ──(vscode/cursor/pycharm)──> [Editor Deep Links]
+[FE fetch/axios + BE decorators/routes] ──> [ApiLinker] ──(API_CALL edges)──> [TopologyGraphBuilder]
+[.omni-atlas.toml] ──> [load_config] ──(validated custom SCM)──> [LanguageRegistry]
 ```

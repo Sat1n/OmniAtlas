@@ -1,11 +1,3 @@
----
-id: omni_atlas_readme
-type: interface
-inputs: []
-outputs: []
-tags: [docs, cli, mcp, visualization]
----
-
 # OmniAtlas 🌍
 
 > **Code topology & AST dependency graph, out of the box.**

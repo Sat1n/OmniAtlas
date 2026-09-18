@@ -32,7 +32,7 @@ from core.parser import ANCHOR_RE
 from core.linker import FRONTEND_EXTENSIONS
 
 #: Server software version reported in the initialize handshake.
-SERVER_VERSION = "0.2.0"
+SERVER_VERSION = "0.2.1"
 
 #: MCP revision implemented (echoed back when the client speaks a newer one).
 PROTOCOL_VERSION = "2024-11-05"
@@ -340,7 +340,7 @@ class ArchitectureTools:
 # --------------------------------------------------------------------- #
 
 #: Supported client configuration flavours.
-CLIENT_TARGETS = ("cursor", "claude")
+CLIENT_TARGETS = ("cursor", "claude", "opencode", "codex")
 
 
 def mcp_server_entry(workspace: str | Path) -> dict[str, Any]:
@@ -359,8 +359,21 @@ def mcp_server_entry(workspace: str | Path) -> dict[str, Any]:
     return {"command": uv, "args": ["run", "omni-atlas", "mcp"], "cwd": workspace_path}
 
 
+def opencode_server_entry(workspace: str | Path) -> dict[str, Any]:
+    """opencode local-server entry (command array includes args)."""
+    base = mcp_server_entry(workspace)
+    return {
+        "type": "local",
+        "command": [base["command"], *base["args"]],
+        "cwd": base["cwd"],
+        "enabled": True,
+    }
+
+
 def build_client_config(target: str, workspace: str | Path) -> dict[str, Any]:
-    """Build the full ``{"mcpServers": {...}}`` document for a client."""
+    """Build the client document (opencode uses ``mcp``, others ``mcpServers``)."""
+    if target == "opencode":
+        return {"mcp": {"omni-atlas": opencode_server_entry(workspace)}}
     return {"mcpServers": {"omni-atlas": mcp_server_entry(workspace)}}
 
 
@@ -377,10 +390,19 @@ def claude_config_path() -> Path:
     return Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
 
 
+def codex_config_path() -> Path:
+    """Default Codex CLI configuration path (TOML)."""
+    return Path.home() / ".codex" / "config.toml"
+
+
 def client_config_path(target: str, workspace: str | Path) -> Path:
     """Where ``--write`` installs the config for a given client target."""
     if target == "cursor":
         return Path(workspace).resolve() / ".cursor" / "mcp.json"
+    if target == "opencode":
+        return Path(workspace).resolve() / "opencode.json"
+    if target == "codex":
+        return codex_config_path()
     return claude_config_path()
 
 
@@ -401,16 +423,73 @@ def load_client_config(path: Path) -> dict[str, Any]:
     return data
 
 
-def merge_client_config(path: Path, entry: dict[str, Any]) -> None:
+def merge_client_config(
+    path: Path, entry: dict[str, Any], servers_key: str = "mcpServers"
+) -> None:
     """Merge our server entry into a client config, preserving siblings."""
     data = load_client_config(path)
-    servers = data.get("mcpServers")
+    servers = data.get(servers_key)
     if not isinstance(servers, dict):
         servers = {}
-        data["mcpServers"] = servers
+        data[servers_key] = servers
     servers["omni-atlas"] = entry
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _toml_string(value: str) -> str:
+    """Quote a value as a TOML basic string (Windows-safe)."""
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def build_codex_toml(workspace: str | Path) -> str:
+    """Codex CLI ``[mcp_servers.omni-atlas]`` TOML section."""
+    entry = mcp_server_entry(workspace)
+    args = ", ".join(_toml_string(arg) for arg in entry["args"])
+    return (
+        "[mcp_servers.omni-atlas]\n"
+        f"command = {_toml_string(entry['command'])}\n"
+        f"args = [{args}]\n"
+        f"cwd = {_toml_string(entry['cwd'])}\n"
+    )
+
+
+def merge_codex_config(path: Path, workspace: str | Path) -> None:
+    """Insert or replace the OmniAtlas section in a Codex config.
+
+    Text-level section merge (stdlib has no TOML writer): everything
+    outside ``[mcp_servers.omni-atlas]`` is preserved byte-for-byte.
+    """
+    snippet = build_codex_toml(workspace)
+    existing = ""
+    if path.is_file():
+        try:
+            existing = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise ValueError(f"cannot read existing config: {path} ({exc})") from exc
+    lines = existing.splitlines()
+    result: list[str] = []
+    index = 0
+    replaced = False
+    while index < len(lines):
+        line = lines[index]
+        if line.strip() == "[mcp_servers.omni-atlas]":
+            result.append(snippet.rstrip("\n"))
+            index += 1
+            while index < len(lines) and not lines[index].lstrip().startswith("["):
+                index += 1
+            replaced = True
+            continue
+        result.append(line)
+        index += 1
+    if replaced:
+        text = "\n".join(result).rstrip("\n") + "\n"
+    else:
+        body = "\n".join(result).rstrip("\n")
+        text = (body + "\n\n" if body else "") + snippet
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
 #: Tool catalogue advertised through MCP ``tools/list``.

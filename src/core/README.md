@@ -82,6 +82,8 @@ on top and are reported as ``FILE_SKIPPED`` diagnostics.
 * Client config entry (runtime detection): [mcp_server_entry](src/core/mcp.py#function:mcp_server_entry)
 * Client config document builder: [build_client_config](src/core/mcp.py#function:build_client_config)
 * Safe config merge (preserves siblings): [merge_client_config](src/core/mcp.py#function:merge_client_config)
+* Codex CLI TOML section builder: [build_codex_toml](src/core/mcp.py#function:build_codex_toml)
+* Codex CLI section merge: [merge_codex_config](src/core/mcp.py#function:merge_codex_config)
 
 The MCP server exposes ``get_architectural_context`` (suppliers/consumers/
 API mappings/doc anchors for a file), ``check_doc_sync`` (structured
@@ -90,7 +92,9 @@ linter report with fix hints), ``query_topology`` (keyword search) and
 AI coding agents. ``omni-atlas check --json`` and ``omni-atlas graph
 --json`` provide the same headless contract on the shell, and
 ``omni-atlas init-mcp`` generates (or merges, with ``--write``) the
-client configuration for Cursor and Claude Desktop.
+client configuration for Cursor, Claude Desktop, opencode (JSON) and
+Codex CLI (text-level TOML section merge keeping the rest of the file
+byte-identical).
 
 ### Distribution (`scripts/build.py` + `.github/workflows/release.yml`)
 

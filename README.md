@@ -57,14 +57,18 @@ Linux x64, macOS arm64 and Windows x64 — download, `chmod +x`, run.
 ## 🤖 MCP Integration
 
 ```bash
-omni-atlas init-mcp --target cursor --write
-omni-atlas init-mcp --target claude --write
+omni-atlas init-mcp --target cursor --write    # .cursor/mcp.json
+omni-atlas init-mcp --target claude --write    # Claude Desktop config
+omni-atlas init-mcp --target opencode --write  # opencode.json
+omni-atlas init-mcp --target codex --write     # ~/.codex/config.toml
 ```
 
-`--write` merges into `.cursor/mcp.json` or the Claude Desktop config
-while preserving other MCP servers; without it the JSON is printed to
-stdout. Four agent tools are exposed: `get_architectural_context`,
-`check_doc_sync`, `query_topology` and `diagnose_workspace`.
+`--write` merges into the client config while preserving other MCP
+servers; without it the JSON/TOML snippet is printed to stdout. Any
+MCP-compliant client works (opencode, Codex CLI, Claude Code, Gemini
+CLI, Windsurf, Zed, Cline, ...). Four agent tools are exposed:
+`get_architectural_context`, `check_doc_sync`, `query_topology` and
+`diagnose_workspace`.
 
 Tagged releases (`v*`) build the same one-file binaries for
 Linux/macOS/Windows via GitHub Actions and smoke-test each one before

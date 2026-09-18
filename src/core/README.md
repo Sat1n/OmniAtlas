@@ -21,7 +21,8 @@ the Git staging area — full-repository scans are architecturally forbidden.
 | `linter.py` | Bidirectional collision check, token budget guard & informational cross-language API audit |
 | `linker.py` | Frontend fetch/axios calls ➔ backend route matcher (Python/Go) producing `api` edges |
 | `config.py` | `.omni-atlas.toml` loader with fault-tolerant `[[custom_scm]]` query validation |
-| `mcp.py` | Headless MCP server (stdio JSON-RPC) & agent tools (architectural context, doc sync, topology query) |
+| `diagnostics.py` | Diagnostic collector, path sanitizer & workspace health scans (doctor / report-bug) |
+| `mcp.py` | Headless MCP server (stdio JSON-RPC) & agent tools (context, doc sync, topology, diagnostics) |
 | `installer.py` | One-shot pre-commit hook installer (`omni-atlas init`) |
 | `graph.py` | Topology DAG builder, Cytoscape converter & compound container grouping |
 | `server.py` | Zero-dependency stdlib web server: dashboard, SSE change stream (`/api/events`), editor launch (`POST /api/open-in-editor`) & IDE detection (`/api/ides`) |
@@ -71,9 +72,25 @@ the Git staging area — full-repository scans are architecturally forbidden.
 
 The MCP server exposes ``get_architectural_context`` (suppliers/consumers/
 API mappings/doc anchors for a file), ``check_doc_sync`` (structured
-linter report with fix hints) and ``query_topology`` (keyword search) to
+linter report with fix hints), ``query_topology`` (keyword search) and
+``diagnose_workspace`` (parse health, skipped files, unmatched API) to
 AI coding agents. ``omni-atlas check --json`` and ``omni-atlas graph
 --json`` provide the same headless contract on the shell.
+
+### Diagnostics & Health (`diagnostics.py`)
+
+* Event collector (ring buffer): [DiagnosticCollector](src/core/diagnostics.py#class:DiagnosticCollector)
+* Path sanitizer (no user dirs in reports): [sanitize_path](src/core/diagnostics.py#function:sanitize_path)
+* Workspace health scan: [scan_workspace](src/core/diagnostics.py#function:scan_workspace)
+* Single-file parse diagnosis: [diagnose_file](src/core/diagnostics.py#function:diagnose_file)
+* Environment / grammar snapshot: [environment_info](src/core/diagnostics.py#function:environment_info)
+* Sanitized bug report builder: [build_bug_report](src/core/diagnostics.py#function:build_bug_report)
+
+Parse errors, skipped files, invalid custom SCM queries and unmatched
+API routes are collected process-wide (deduplicated) so the silent
+failure modes of the multi-language pipeline stay visible. ``omni-atlas
+doctor`` renders the health panel; ``omni-atlas report-bug`` emits a
+paste-safe Markdown/JSON report with all paths rebased.
 
 ### Hook Installer (`installer.py`)
 
@@ -150,4 +167,5 @@ flashes the nodes whose status changed. ``/api/ides`` also reports
 [FE fetch/axios + BE decorators/routes] ──> [ApiLinker] ──(API_CALL edges)──> [TopologyGraphBuilder]
 [.omni-atlas.toml] ──> [load_config] ──(validated custom SCM)──> [LanguageRegistry]
 [AI Agent / CI] ──> [McpServer / check --json / graph --json] ──> [Headless JSON]
+[Parse/Link/Skip events] ──> [DiagnosticCollector] ──> [doctor / report-bug / diagnose_workspace]
 ```

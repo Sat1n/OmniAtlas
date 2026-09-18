@@ -43,7 +43,12 @@ def test_tools_list_registers_agent_tools() -> None:
     server = McpServer(".")
     tools = rpc(server, "tools/list")["result"]["tools"]
     names = {t["name"] for t in tools}
-    assert names == {"get_architectural_context", "check_doc_sync", "query_topology"}
+    assert names == {
+        "get_architectural_context",
+        "check_doc_sync",
+        "query_topology",
+        "diagnose_workspace",
+    }
     for tool in tools:
         assert tool["inputSchema"]["type"] == "object"
 

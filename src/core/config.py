@@ -25,6 +25,8 @@ from typing import Any
 
 from rich.console import Console
 
+from core.diagnostics import KIND_INVALID_CUSTOM_SCM, get_collector
+
 #: Configuration file looked up at the repository root.
 CONFIG_FILENAME = ".omni-atlas.toml"
 
@@ -70,11 +72,21 @@ def load_config(repo_root: str | Path = ".") -> ProjectConfig:
     for raw in entries:
         if not isinstance(raw, dict) or not str(raw.get("language", "")).strip():
             _warn("skipping a [[custom_scm]] entry without a language")
+            get_collector(Path(repo_root)).record(
+                KIND_INVALID_CUSTOM_SCM,
+                CONFIG_FILENAME,
+                "[[custom_scm]] entry without a language",
+            )
             continue
         query = raw.get("query")
         path = raw.get("path")
         if not query and not path:
             _warn(f"skipping [[custom_scm]] '{raw.get('name', '?')}': needs query or path")
+            get_collector(Path(repo_root)).record(
+                KIND_INVALID_CUSTOM_SCM,
+                CONFIG_FILENAME,
+                f"[[custom_scm]] '{raw.get('name', '?')}' needs query or path",
+            )
             continue
         config.custom_scm.append(
             CustomScm(

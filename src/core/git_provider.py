@@ -15,6 +15,8 @@ from typing import NoReturn
 from rich.console import Console
 from rich.text import Text
 
+from core.diagnostics import KIND_FILE_SKIPPED, get_collector
+
 console = Console()
 
 #: Directories never scanned for project files (shared with ``linter.py``).
@@ -108,6 +110,7 @@ class GitProvider:
         @source root: filesystem#path:. (repository root)
         """
         changes = StagedChanges()
+        collector = get_collector(root)
         for path in sorted(Path(root).rglob("*")):
             if not path.is_file():
                 continue
@@ -115,6 +118,11 @@ class GitProvider:
                 part in IGNORED_DIRS or part.startswith(".")
                 for part in path.parts
             ):
+                if "vendor" in path.parts:
+                    collector.record(
+                        KIND_FILE_SKIPPED, path, "vendored third-party file skipped",
+                        reason="vendor",
+                    )
                 continue
             if path.suffix in CODE_EXTENSIONS:
                 changes.code_files.append(path.as_posix())

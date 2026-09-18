@@ -23,6 +23,14 @@ from typing import Any
 import tree_sitter_python as tspython
 from tree_sitter import Language, Parser, Query, QueryCursor
 
+from core.diagnostics import (
+    KIND_AST_PARSE_ERROR,
+    KIND_FILE_SKIPPED,
+    KIND_INVALID_CUSTOM_SCM,
+    MAX_PARSE_BYTES,
+    get_collector,
+)
+
 PY_LANGUAGE = Language(tspython.language())
 
 #: ``[Title](path/file.py#symbol_type:SymbolName)`` — BLUEPRINT §3 protocols.
@@ -454,6 +462,7 @@ class FileFacts:
 
     path: str
     language: str | None = None
+    skip_reason: str | None = None
     symbols: list[SymbolDecl] = field(default_factory=list)
     imports: list[str] = field(default_factory=list)
     endpoints: list[tuple[str, str]] = field(default_factory=list)
@@ -476,6 +485,7 @@ class LanguageRegistry:
 
     def __init__(self) -> None:
         self._parsers: dict[str, Any] = {}
+        self._languages: dict[str, Any] = {}
         self._ext_map: dict[str, str] = {}
         for lang, module_name, func_name, extensions in _GRAMMAR_SPECS:
             try:
@@ -484,6 +494,7 @@ class LanguageRegistry:
             except (ImportError, AttributeError, TypeError, RuntimeError):
                 continue  # grammar unavailable — language degrades gracefully
             self._parsers[lang] = Parser(language)
+            self._languages[lang] = language
             for ext in extensions:
                 self._ext_map[ext] = lang
         self._custom: list[tuple[str, str, Any]] = []  # (lang, name, Query)
@@ -492,6 +503,15 @@ class LanguageRegistry:
     def available_languages(self) -> list[str]:
         """Grammars that loaded successfully in this environment."""
         return sorted(self._parsers)
+
+    def parser_for(self, language: str | None):
+        """Return the Tree-sitter Parser for a language id, or None."""
+        return self._parsers.get(language) if language else None
+
+    def grammar_abi(self, language: str) -> int | None:
+        """ABI version of a loaded grammar (for environment diagnosis)."""
+        lang = self._languages.get(language)
+        return getattr(lang, "abi_version", None) if lang is not None else None
 
     def language_for(self, file_path: str | Path) -> str | None:
         """Return the registry language id for a path, or None."""
@@ -521,6 +541,12 @@ class LanguageRegistry:
             try:
                 query = Query(language, source)
             except Exception as exc:  # invalid SCM must not break parsing
+                get_collector().record(
+                    KIND_INVALID_CUSTOM_SCM,
+                    scm_path or f"<inline:{name}>",
+                    f"invalid SCM query: {exc}",
+                    language=lang,
+                )
                 console_print(
                     f"[yellow]omni-atlas: skipping invalid custom SCM "
                     f"'{name}' ({lang}): {exc}[/yellow]"
@@ -536,6 +562,22 @@ class LanguageRegistry:
         """
         path = Path(file_path)
         facts = FileFacts(path=path.as_posix())
+        collector = get_collector()
+        if ".min." in path.name:
+            facts.skip_reason = "minified bundle"
+            collector.record(KIND_FILE_SKIPPED, path, "minified bundle skipped")
+            return facts
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = 0
+        if size > MAX_PARSE_BYTES:
+            facts.skip_reason = "oversized file"
+            collector.record(
+                KIND_FILE_SKIPPED, path, "oversized file skipped",
+                size=f"{size // 1024} KiB",
+            )
+            return facts
         if path.suffix.lower() == ".html":
             facts.language = "html"
             self._extract_html(path, facts)
@@ -549,6 +591,17 @@ class LanguageRegistry:
             return facts
         facts.language = lang
         tree = self._parsers[lang].parse(source)
+        if tree.root_node.has_error:
+            errors = sum(
+                1 for node in self._walk(tree.root_node)
+                if node.type == "ERROR" or node.is_missing
+            )
+            collector.record(
+                KIND_AST_PARSE_ERROR,
+                path,
+                f"{errors} syntax error node(s)",
+                language=lang,
+            )
         extractor = {
             "typescript": self._extract_ts,
             "tsx": self._extract_ts,

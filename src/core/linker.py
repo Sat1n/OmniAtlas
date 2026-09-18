@@ -17,9 +17,10 @@ cross-language ``API_CALL`` edge.
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from core.diagnostics import KIND_UNMATCHED_API_ROUTE, get_collector
 from core.parser import FileFacts, LanguageRegistry
 
 #: Frontend extensions scanned for fetch/axios calls.
@@ -30,6 +31,14 @@ BACKEND_EXTENSIONS = {".py", ".go"}
 
 #: Path suffixes ignored when matching (query strings / fragments).
 _URL_STRIP_RE = re.compile(r"[?#].*$")
+
+
+@dataclass
+class ApiAudit:
+    """Full audit outcome: matched links plus unmatched frontend calls."""
+
+    links: list["ApiLink"] = field(default_factory=list)
+    unmatched: list[tuple[str, str, str]] = field(default_factory=list)  # file, method, url
 
 
 @dataclass
@@ -60,6 +69,14 @@ class ApiLinker:
         @shape return: list[ApiLink]
         @source facts: src/core/parser.py#function:parse_file
         """
+        return self.audit(files, repo_root).links
+
+    def audit(self, files: list[str], repo_root: str | Path = ".") -> ApiAudit:
+        """Match frontend calls to backend routes; record unmatched ones.
+
+        @shape return: ApiAudit(links, unmatched)
+        @source diagnostics: src/core/diagnostics.py#class:DiagnosticCollector
+        """
         facts_by_file: dict[str, FileFacts] = {}
         for path in files:
             suffix = Path(path).suffix.lower()
@@ -72,8 +89,9 @@ class ApiLinker:
             for method, path, handler in facts.routes:
                 routes.append((method.upper(), self._normalize(path), facts))
 
-        links: list[ApiLink] = []
+        audit = ApiAudit()
         seen: set[tuple[str, str, str]] = set()
+        collector = get_collector()
         for facts in facts_by_file.values():
             for method, url in facts.endpoints:
                 normalized = self._normalize(url)
@@ -81,12 +99,20 @@ class ApiLinker:
                     method.upper(), normalized, routes
                 )
                 if route_facts is None:
+                    audit.unmatched.append((facts.path, method.upper(), url))
+                    collector.record(
+                        KIND_UNMATCHED_API_ROUTE,
+                        facts.path,
+                        f"no backend route for {method.upper()} {url}",
+                        method=method.upper(),
+                        path=url,
+                    )
                     continue
                 key = (facts.path, route_path, route_facts.path)
                 if key in seen:
                     continue
                 seen.add(key)
-                links.append(
+                audit.links.append(
                     ApiLink(
                         source_file=facts.path,
                         target_file=route_facts.path,
@@ -95,7 +121,7 @@ class ApiLinker:
                         path=route_path,
                     )
                 )
-        return links
+        return audit
 
     @staticmethod
     def _normalize(url: str) -> str:

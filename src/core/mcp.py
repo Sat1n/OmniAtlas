@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
+from core.diagnostics import diagnose_file, get_collector, scan_workspace
 from core.git_provider import GitProvider, StagedChanges
 from core.graph import TopologyGraphBuilder
 from core.linter import LinterEngine
@@ -272,6 +273,25 @@ class ArchitectureTools:
         ]
         return {"total": len(matches), "matches": matches, "relations": relations[:100]}
 
+    # -- tool: diagnose_workspace ------------------------------------ #
+
+    def diagnose_workspace(self, file_path: str | None = None) -> dict[str, Any]:
+        """Architecture-transparency probe for agents.
+
+        With ``file_path``: whether that file parses, its Tree-sitter
+        node count and warnings. Without: whole-workspace parse health,
+        skipped files and unmatched API endpoints.
+
+        @shape return: dict
+        """
+        if file_path:
+            return diagnose_file(file_path, self._root)
+        report = scan_workspace(self._root).to_dict()
+        report["recent_diagnostics"] = [
+            event.to_dict() for event in get_collector(self._root).events(20)
+        ]
+        return report
+
     # -- helpers ----------------------------------------------------- #
 
     def _normalize(self, file_path: str) -> str:
@@ -367,6 +387,24 @@ TOOL_SPECS: list[dict[str, Any]] = [
             "required": ["keyword"],
         },
     },
+    {
+        "name": "diagnose_workspace",
+        "description": (
+            "Call before trusting the graph: reports parse health. With a "
+            "file_path it checks that specific file (parsed, node count, "
+            "warnings); without it returns workspace-wide syntax errors, "
+            "skipped files and unmatched API endpoints."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Optional repository-relative file to inspect.",
+                },
+            },
+        },
+    },
 ]
 
 
@@ -447,6 +485,7 @@ class McpServer:
             "get_architectural_context": self._tools.architectural_context,
             "check_doc_sync": self._tools.check_doc_sync,
             "query_topology": self._tools.query_topology,
+            "diagnose_workspace": self._tools.diagnose_workspace,
         }
         handler = dispatch.get(name)
         if handler is None:

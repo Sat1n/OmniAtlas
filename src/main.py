@@ -6,6 +6,7 @@ Project architecture panorama: ``AGENTS.md``.
 
 import json
 import webbrowser
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -13,6 +14,12 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from core.diagnostics import (
+    build_bug_report,
+    bug_report_markdown,
+    environment_info,
+    scan_workspace,
+)
 from core.git_provider import GitProvider, StagedChanges
 from core.graph import TopologyGraphBuilder
 from core.installer import HookInstaller, InstallResult
@@ -208,6 +215,96 @@ def graph(
 def mcp() -> None:
     """Run the headless MCP server (stdio JSON-RPC) for AI coding agents."""
     McpServer().serve_forever()
+
+
+@app.command()
+def doctor() -> None:
+    """Environment & workspace health check (diagnostics, doctor mode)."""
+    env = environment_info()
+    report = scan_workspace(".")
+
+    env_table = Table(show_header=False, expand=False)
+    env_table.add_column(style="bold cyan", no_wrap=True)
+    env_table.add_column()
+    env_table.add_row("Python", str(env.get("python")))
+    env_table.add_row("Platform", str(env.get("platform")))
+    env_table.add_row("tree-sitter", str(env.get("tree_sitter")))
+    console.print(Panel(env_table, title="Environment", border_style="cyan"))
+
+    grammar_table = Table(show_header=True, header_style="bold magenta")
+    grammar_table.add_column("Language")
+    grammar_table.add_column("Package")
+    grammar_table.add_column("Version", justify="center")
+    grammar_table.add_column("ABI", justify="center")
+    grammar_table.add_column("Status", justify="center")
+    for grammar in env.get("grammars", []):
+        loaded = grammar.get("loaded")
+        grammar_table.add_row(
+            grammar["language"],
+            grammar["package"],
+            str(grammar.get("version") or "—"),
+            str(grammar.get("abi") or "—"),
+            "[bold green]loaded[/bold green]" if loaded else "[bold red]missing[/bold red]",
+        )
+    console.print(Panel(grammar_table, title="Tree-sitter Grammar Packs", border_style="cyan"))
+
+    warnings = len(report.syntax_errors)
+    summary = (
+        f"files scanned [bold]{report.total_files}[/bold] · "
+        f"parsed OK [bold green]{report.parsed_ok}[/bold green] · "
+        f"syntax warnings [bold yellow]{warnings}[/bold yellow] · "
+        f"skipped [bold]{len(report.skipped)}[/bold] · "
+        f"unmatched API calls [bold]{len(report.unmatched_api)}[/bold]"
+    )
+    health_style = "green" if report.health >= 95 else "yellow" if report.health >= 80 else "red"
+    body = f"{summary}\n\nHealth: [bold {health_style}]{report.health}%[/bold {health_style}]"
+    if warnings:
+        body += f" — {warnings} file(s) had syntax warnings"
+    if report.syntax_errors:
+        body += "\n\n[bold]Syntax warning files:[/bold]"
+        for item in report.syntax_errors[:10]:
+            body += (
+                f"\n  • [cyan]{item['file']}[/cyan] ({item.get('language')}) — "
+                f"{item['error_nodes']} error node(s), first at line "
+                f"{item.get('first_error_line')}"
+            )
+    if report.skipped:
+        body += "\n\n[bold]Skipped files:[/bold]"
+        for item in report.skipped[:5]:
+            body += f"\n  • [dim]{item['file']} ({item.get('reason')})[/dim]"
+    body += (
+        "\n\n[dim]Full diagnostics:[/dim] [bold]omni-atlas report-bug[/bold] "
+        "[dim]· agent query:[/dim] [bold]diagnose_workspace[/bold]"
+    )
+    console.print(Panel(body, title="Workspace Health", border_style=health_style))
+    raise typer.Exit(code=0)
+
+
+@app.command()
+def report_bug(
+    json_output: bool = typer.Option(
+        False, "--json", help="Emit the raw JSON report instead of Markdown."
+    ),
+    out: str = typer.Option(
+        None, "--out", help="Write the report to a file (e.g. bug_report.md)."
+    ),
+) -> None:
+    """Generate a sanitized bug-diagnosis report (Markdown or JSON)."""
+    report = build_bug_report(".")
+    text = (
+        json.dumps(report, ensure_ascii=False, indent=2)
+        if json_output
+        else bug_report_markdown(report)
+    )
+    if out:
+        Path(out).write_text(text, encoding="utf-8")
+        console.print(
+            f"[bold green]✔ Report written:[/bold green] [cyan]{out}[/cyan] "
+            f"({len(text)} chars)"
+        )
+    else:
+        print(text)  # plain print: Markdown must stay unformatted and pipeable
+    raise typer.Exit(code=0)
 
 
 @app.command()

@@ -38,7 +38,8 @@ omni-atlas/
     │   ├── installer.py    # Pre-commit hook installer (`omni-atlas init`)
     │   ├── graph.py        # Topology DAG builder & Cytoscape converter
     │   ├── server.py       # Zero-dependency dashboard server (SSE, APIs, IDE links)
-    │   └── mcp.py          # Headless MCP server (stdio JSON-RPC) & agent tools
+    │   ├── mcp.py          # Headless MCP server (stdio JSON-RPC) & agent tools
+    │   └── diagnostics.py  # Health checks, sanitized bug reports (doctor/report-bug)
     └── ui/
         └── index.html      # Single-file Cytoscape topology dashboard
 

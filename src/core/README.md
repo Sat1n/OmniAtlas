@@ -92,7 +92,11 @@ CLI, the dashboard and every Tree-sitter C-extension into
 ``v*`` tag runs the GitHub Actions matrix (Linux/macOS/Windows),
 smoke-tests every binary (``--help`` / ``doctor`` / ``init-mcp``),
 generates a categorized changelog from commit prefixes and attaches all
-binaries to the release.
+binaries to the release. The published wheel nests the implementation
+as ``omni_atlas.core`` (``omni_atlas/__init__`` registers a ``core``
+import alias) while the repository keeps ``src/core`` so documentation
+anchors stay stable; ``omni-atlas`` on PyPI installs via
+``pip install omni-atlas`` / ``uv tool install omni-atlas``.
 
 ### Diagnostics & Health (`diagnostics.py`)
 

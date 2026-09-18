@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 
 import core.server as server_module
 from core.mcp import build_client_config, mcp_server_entry
-from main import app
+from omni_atlas.cli.main import app
 from scripts.build import target_name
 
 runner = CliRunner()

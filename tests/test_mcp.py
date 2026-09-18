@@ -5,7 +5,7 @@ import json
 from typer.testing import CliRunner
 
 from core.mcp import McpServer
-from main import app
+from omni_atlas.cli.main import app
 
 runner = CliRunner()
 
@@ -85,7 +85,8 @@ def test_check_doc_sync_structured_report() -> None:
     for stale in payload["stale_docs"]:
         assert stale["suggestion"]
     filtered = tool_call(McpServer("."), "check_doc_sync", {"path_filter": "src/core"})
-    assert all("src/core" in s["code_file"] for s in filtered["stale_docs"])
+    # path_filter selects documents; stale entries are reported per doc.
+    assert all("src/core" in s["doc_file"] for s in filtered["stale_docs"])
 
 
 def test_rpc_errors_are_well_formed() -> None:

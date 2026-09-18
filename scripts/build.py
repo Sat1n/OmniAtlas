@@ -72,7 +72,7 @@ def build_command(name: str) -> list[str]:
         args += ["--collect-all", package]
     for package in METADATA_PACKAGES:
         args += ["--copy-metadata", package]
-    args.append(str(ROOT / "src" / "main.py"))
+    args.append(str(ROOT / "src" / "omni_atlas" / "cli" / "main.py"))
     return args
 
 

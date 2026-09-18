@@ -30,7 +30,8 @@ omni-atlas/
 ├── .github/              # Release workflow: tag-triggered matrix builds
 ├── tests/                # Pytest suite & multi-language fixtures
 └── src/
-    ├── main.py           # CLI Entrypoint & command routing (Typer)
+    ├── omni_atlas/       # Installable package namespace (wheel: omni_atlas.*)
+    │   └── cli/main.py   # CLI Entrypoint & command routing (Typer)
     ├── core/
     │   ├── git_provider.py # Incremental Git diff scanning engine
     │   ├── parser.py       # Markdown anchors + multi-language Tree-sitter registry

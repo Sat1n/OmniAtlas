@@ -65,6 +65,62 @@ def test_init_mcp_write_refuses_invalid_existing_config(tmp_path: Path) -> None:
     assert config.read_text(encoding="utf-8") == "{not valid json"  # untouched
 
 
+def test_init_mcp_opencode_prints_and_merges(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["init-mcp", "--target", "opencode", "--workspace", str(tmp_path)])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    entry = payload["mcp"]["omni-atlas"]
+    assert entry["type"] == "local"
+    assert entry["command"][-1] == "mcp"  # command array carries the subcommand
+    assert entry["enabled"] is True
+    assert entry["cwd"] == str(tmp_path.resolve())
+
+    # Merge into an existing opencode.json without clobbering other keys.
+    target = tmp_path / "opencode.json"
+    target.write_text(
+        json.dumps({"mcp": {"existing": {"type": "local", "command": ["foo"]}}, "theme": "dark"}),
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app,
+        ["init-mcp", "--target", "opencode", "--workspace", str(tmp_path), "--write"],
+    )
+    assert result.exit_code == 0
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert payload["theme"] == "dark"
+    assert payload["mcp"]["existing"]["command"] == ["foo"]
+    assert payload["mcp"]["omni-atlas"]["type"] == "local"
+
+
+def test_init_mcp_codex_toml_snippet_and_merge(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["init-mcp", "--target", "codex", "--workspace", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "[mcp_servers.omni-atlas]" in result.stdout
+    assert 'cwd = "' in result.stdout
+
+    target = tmp_path / "config.toml"
+    target.write_text(
+        'model = "gpt-5"\n\n[mcp_servers.other]\ncommand = "other"\n',
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app,
+        ["init-mcp", "--target", "codex", "--workspace", str(tmp_path), "--out", str(target), "--write"],
+    )
+    assert result.exit_code == 0
+    text = target.read_text(encoding="utf-8")
+    assert text.count("[mcp_servers.omni-atlas]") == 1
+    assert "[mcp_servers.other]" in text and 'model = "gpt-5"' in text
+
+    # Idempotent: a second write replaces the section instead of appending.
+    result = runner.invoke(
+        app,
+        ["init-mcp", "--target", "codex", "--workspace", str(tmp_path), "--out", str(target), "--write"],
+    )
+    assert result.exit_code == 0
+    assert target.read_text(encoding="utf-8").count("[mcp_servers.omni-atlas]") == 1
+
+
 def test_init_mcp_rejects_unknown_target() -> None:
     result = runner.invoke(app, ["init-mcp", "--target", "vscode"])
     assert result.exit_code == 1

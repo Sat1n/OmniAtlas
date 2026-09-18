@@ -28,12 +28,14 @@ from core.mcp import (
     CLIENT_TARGETS,
     McpServer,
     build_client_config,
+    build_codex_toml,
     client_config_path,
     merge_client_config,
+    merge_codex_config,
 )
 from core.server import AtlasWebServer, is_headless_environment
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 
 app = typer.Typer(
     name="omni-atlas",
@@ -230,7 +232,7 @@ def graph(
 def init_mcp(
     target: str = typer.Option(
         "cursor", "--target", "-t",
-        help="Client flavour: cursor (.cursor/mcp.json) or claude (desktop config).",
+        help="Client flavour: cursor | claude | opencode | codex.",
     ),
     workspace: str = typer.Option(
         None, "--workspace", "-w",
@@ -254,8 +256,28 @@ def init_mcp(
         raise typer.Exit(code=1)
 
     workspace_path = Path(workspace).resolve() if workspace else Path.cwd()
+
+    if target == "codex":
+        if not write:
+            print(build_codex_toml(workspace_path))
+            raise typer.Exit(code=0)
+        destination = Path(out).resolve() if out else client_config_path("codex", workspace_path)
+        try:
+            merge_codex_config(destination, workspace_path)
+        except ValueError as exc:
+            _render_init_error(exc)
+        body = (
+            f"✔ MCP server registered for [bold]codex[/bold]\n"
+            f"  Config: [cyan]{destination}[/cyan]\n"
+            f"  Workspace: [cyan]{workspace_path}[/cyan]\n\n"
+            "Everything outside \\[mcp_servers.omni-atlas] was preserved. "
+            "Restart the client to pick up the new server."
+        )
+        console.print(Panel(body, title="OmniAtlas MCP Configured", border_style="green"))
+        raise typer.Exit(code=0)
+
     config = build_client_config(target, workspace_path)
-    entry = config["mcpServers"]["omni-atlas"]
+    entry = (config["mcp"] if target == "opencode" else config["mcpServers"])["omni-atlas"]
 
     if not write:
         print(json.dumps(config, ensure_ascii=False, indent=2))
@@ -263,23 +285,36 @@ def init_mcp(
 
     destination = Path(out).resolve() if out else client_config_path(target, workspace_path)
     try:
-        merge_client_config(destination, entry)
+        merge_client_config(
+            destination,
+            entry,
+            "mcp" if target == "opencode" else "mcpServers",
+        )
     except ValueError as exc:
-        text = Text("✖ Error: ", style="bold red")
-        text.append(str(exc), style="red")
-        console.print(text)
-        raise typer.Exit(code=1)
+        _render_init_error(exc)
 
+    command = entry["command"]
+    if isinstance(command, list):  # opencode stores command + args in one array
+        command = " ".join(command)
+    else:
+        command = f"{command} {' '.join(entry['args'])}"
     body = (
         f"✔ MCP server registered for [bold]{target}[/bold]\n"
         f"  Config: [cyan]{destination}[/cyan]\n"
-        f"  Command: [cyan]{entry['command']} {' '.join(entry['args'])}[/cyan]\n"
+        f"  Command: [cyan]{command}[/cyan]\n"
         f"  Workspace: [cyan]{entry['cwd']}[/cyan]\n\n"
         "Other MCP servers in that file were preserved. Restart the client "
         "to pick up the new server."
     )
     console.print(Panel(body, title="OmniAtlas MCP Configured", border_style="green"))
     raise typer.Exit(code=0)
+
+
+def _render_init_error(exc: Exception) -> None:
+    text = Text("✖ Error: ", style="bold red")
+    text.append(str(exc), style="red")
+    console.print(text)
+    raise typer.Exit(code=1)
 
 
 @app.command()

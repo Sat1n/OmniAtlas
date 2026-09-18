@@ -1,5 +1,9 @@
 # OmniAtlas 🌍
 
+[![PyPI](https://img.shields.io/pypi/v/omni-atlas)](https://pypi.org/project/omni-atlas/)
+[![Python](https://img.shields.io/pypi/pyversions/omni-atlas)](https://pypi.org/project/omni-atlas/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 > **Code topology & AST dependency graph, out of the box.**
 
 [English] | [简体中文](README_ZH.md)

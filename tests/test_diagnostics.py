@@ -23,7 +23,7 @@ from core.diagnostics import (
 )
 from core.mcp import McpServer
 from core.parser import LanguageRegistry
-from main import app
+from omni_atlas.cli.main import app
 
 FIXTURES = Path(__file__).parent / "fixtures"
 runner = CliRunner()

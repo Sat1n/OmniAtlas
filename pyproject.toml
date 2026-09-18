@@ -1,9 +1,20 @@
 [project]
-name = "omniatlas"
+name = "omni-atlas"
 version = "0.1.0"
-description = "OmniAtlas Linter — incremental static analysis enforcing the BLUEPRINT.md meta-specification."
+description = "Code topology & AST dependency graph — docs-vs-code linter, web dashboard and MCP server."
 readme = "README.md"
+license = { text = "MIT" }
 requires-python = ">=3.12"
+authors = [{ name = "Sat1n" }]
+keywords = ["static-analysis", "tree-sitter", "documentation", "topology", "mcp", "linter"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Documentation",
+    "Topic :: Software Development :: Quality Assurance",
+]
 dependencies = [
     "rich>=15.0.0",
     "tree-sitter>=0.26.0",
@@ -16,18 +27,25 @@ dependencies = [
     "typer>=0.26.8",
 ]
 
+[project.urls]
+Homepage = "https://github.com/Sat1n/OmniAtlas"
+Repository = "https://github.com/Sat1n/OmniAtlas"
+Issues = "https://github.com/Sat1n/OmniAtlas/issues"
+
 [project.scripts]
-omni-atlas = "main:app"
+omni-atlas = "omni_atlas.cli.main:app"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/core", "src/main.py"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"src/ui" = "ui"
+packages = ["src/omni_atlas"]
+# The repository keeps `src/core` (documentation anchors depend on it);
+# the installed wheel nests it as `omni_atlas.core` so site-packages
+# stays clean. Dev runs resolve `core` via the src path instead.
+force-include = { "src/core" = "omni_atlas/core", "src/ui" = "omni_atlas/ui" }
+dev-mode-dirs = ["src"]
 
 [tool.pytest.ini_options]
 pythonpath = [".", "src"]

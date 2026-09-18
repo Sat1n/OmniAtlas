@@ -17,7 +17,10 @@ Three agent-facing tools expose the Phase 8 topology and linter:
 """
 
 import json
+import os
+import shutil
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -330,6 +333,84 @@ class ArchitectureTools:
                 if Path(match.group("path")).as_posix() == target_file:
                     found.append({"line": number, "text": line.strip()})
         return found
+
+
+# --------------------------------------------------------------------- #
+# MCP client configuration generation (init-mcp)
+# --------------------------------------------------------------------- #
+
+#: Supported client configuration flavours.
+CLIENT_TARGETS = ("cursor", "claude")
+
+
+def mcp_server_entry(workspace: str | Path) -> dict[str, Any]:
+    """Command/args/cwd entry for this runtime (frozen binary or uv).
+
+    Includes the absolute workspace path so the server analyzes the
+    right project regardless of how the client spawns it.
+    """
+    workspace_path = str(Path(workspace).resolve())
+    if getattr(sys, "frozen", False):
+        return {"command": sys.executable, "args": ["mcp"], "cwd": workspace_path}
+    installed = shutil.which("omni-atlas")
+    if installed:
+        return {"command": installed, "args": ["mcp"], "cwd": workspace_path}
+    uv = shutil.which("uv") or "uv"
+    return {"command": uv, "args": ["run", "omni-atlas", "mcp"], "cwd": workspace_path}
+
+
+def build_client_config(target: str, workspace: str | Path) -> dict[str, Any]:
+    """Build the full ``{"mcpServers": {...}}`` document for a client."""
+    return {"mcpServers": {"omni-atlas": mcp_server_entry(workspace)}}
+
+
+def claude_config_path() -> Path:
+    """Default Claude Desktop configuration path for this platform."""
+    if sys.platform == "darwin":
+        return (
+            Path.home() / "Library" / "Application Support"
+            / "Claude" / "claude_desktop_config.json"
+        )
+    if sys.platform.startswith("win"):
+        base = os.environ.get("APPDATA") or str(Path.home())
+        return Path(base) / "Claude" / "claude_desktop_config.json"
+    return Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
+
+
+def client_config_path(target: str, workspace: str | Path) -> Path:
+    """Where ``--write`` installs the config for a given client target."""
+    if target == "cursor":
+        return Path(workspace).resolve() / ".cursor" / "mcp.json"
+    return claude_config_path()
+
+
+def load_client_config(path: Path) -> dict[str, Any]:
+    """Read an existing client config, refusing to clobber invalid JSON.
+
+    Raises:
+        ValueError: when the file exists but is not a JSON object.
+    """
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8") or "{}")
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"existing config is not valid JSON: {path} ({exc})") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"existing config is not a JSON object: {path}")
+    return data
+
+
+def merge_client_config(path: Path, entry: dict[str, Any]) -> None:
+    """Merge our server entry into a client config, preserving siblings."""
+    data = load_client_config(path)
+    servers = data.get("mcpServers")
+    if not isinstance(servers, dict):
+        servers = {}
+        data["mcpServers"] = servers
+    servers["omni-atlas"] = entry
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 #: Tool catalogue advertised through MCP ``tools/list``.

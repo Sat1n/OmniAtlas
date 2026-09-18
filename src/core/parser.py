@@ -887,7 +887,7 @@ class LanguageRegistry:
 
 
 def console_print(message: str) -> None:
-    """Rich-aware console print for parser warnings (kept dependency-light)."""
+    """Rich-aware warning print for the parser (stderr, stdout stays clean)."""
     from rich.console import Console
 
-    Console().print(message)
+    Console(stderr=True).print(message)

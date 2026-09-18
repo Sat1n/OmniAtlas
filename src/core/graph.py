@@ -82,7 +82,7 @@ class TopologyGraphBuilder:
         self._registry.load_custom_scm(load_config(repo_root).custom_scm)
         self._linker = ApiLinker(self._registry)
         self._nodes: dict[str, dict[str, Any]] = {}
-        self._edges: dict[tuple[str, str, str], None] = {}
+        self._edges: dict[tuple[str, str, str], dict[str, Any]] = {}
         self._id_map: dict[str, str] = {}  # frontmatter id -> node id
 
     def build(self) -> "TopologyGraphBuilder":
@@ -134,9 +134,10 @@ class TopologyGraphBuilder:
                         "source": source,
                         "target": target,
                         "kind": kind,
+                        **meta,
                     }
                 }
-                for (source, target, kind) in self._edges
+                for (source, target, kind), meta in self._edges.items()
             ],
         }
 
@@ -479,7 +480,10 @@ class TopologyGraphBuilder:
             source_id = self._ensure_file_node(link.source_file)
             target_id = self._ensure_backend_symbol(link.target_symbol_id, link.target_file)
             if source_id and target_id:
-                self._add_edge(source_id, target_id, "api")
+                self._add_edge(
+                    source_id, target_id, "api",
+                    method=link.method, path=link.path,
+                )
 
     def _ensure_backend_symbol(self, symbol_id: str, file_path: str) -> str | None:
         """Return the backend handler symbol node, minting it if needed."""
@@ -600,10 +604,12 @@ class TopologyGraphBuilder:
             node["line_number"] = line
         self._nodes[node_id] = node
 
-    def _add_edge(self, source: str, target: str, kind: str) -> None:
+    def _add_edge(
+        self, source: str, target: str, kind: str, **meta: Any
+    ) -> None:
         if source == target:
             return
-        self._edges.setdefault((source, target, kind), None)
+        self._edges.setdefault((source, target, kind), meta)
 
     @staticmethod
     def _as_list(value: Any) -> list[str]:

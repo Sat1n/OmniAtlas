@@ -66,8 +66,12 @@ def load_config(repo_root: str | Path = ".") -> ProjectConfig:
     if not config_path.is_file():
         return ProjectConfig()
     try:
-        data = tomllib.loads(config_path.read_text(encoding="utf-8"))
-    except (tomllib.TOMLDecodeError, OSError) as exc:
+        # Undecodable bytes degrade to replacement chars and surface as a
+        # TOML decode error below instead of crashing the whole command.
+        data = tomllib.loads(
+            config_path.read_text(encoding="utf-8", errors="replace")
+        )
+    except (tomllib.TOMLDecodeError, OSError, UnicodeDecodeError) as exc:
         _warn(f"ignoring {CONFIG_FILENAME}: {exc}")
         return ProjectConfig()
 

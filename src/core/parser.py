@@ -16,6 +16,7 @@ engines only load the precise boundaries of the requested symbol.
 """
 
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -33,13 +34,59 @@ from core.diagnostics import (
 
 PY_LANGUAGE = Language(tspython.language())
 
+#: Transient Windows file-lock retries (antivirus / editor save races).
+READ_RETRIES = 1
+READ_RETRY_DELAY = 0.05
+
+
+def read_text_resilient(
+    path: str | Path, encoding: str = "utf-8", errors: str = "replace"
+) -> str | None:
+    """Read text safely: retry transient PermissionError, never raise.
+
+    Undecodable bytes fall back to ``errors="replace"`` so a single
+    mojibake document can never abort a whole-tree scan.
+
+    @shape return: str | None (None when unreadable)
+    """
+    for attempt in range(READ_RETRIES + 1):
+        try:
+            return Path(path).read_text(encoding=encoding, errors=errors)
+        except PermissionError:
+            if attempt < READ_RETRIES:
+                time.sleep(READ_RETRY_DELAY)
+                continue
+            return None
+        except OSError:
+            return None
+    return None
+
+
+def read_bytes_resilient(path: str | Path) -> bytes | None:
+    """Read bytes safely: retry transient PermissionError, never raise.
+
+    @shape return: bytes | None (None when unreadable)
+    """
+    for attempt in range(READ_RETRIES + 1):
+        try:
+            return Path(path).read_bytes()
+        except PermissionError:
+            if attempt < READ_RETRIES:
+                time.sleep(READ_RETRY_DELAY)
+                continue
+            return None
+        except OSError:
+            return None
+    return None
+
 #: ``[Title](path/file.ext#symbol_type:SymbolName)`` — BLUEPRINT §3 protocols.
 #: Any source extension is accepted; the resolver dispatches the symbol
 #: lookup to the right engine (Python AST or the multi-language registry).
 ANCHOR_TYPES = ("class", "function", "var", "method", "struct", "enum", "interface")
 ANCHOR_RE = re.compile(
     r"\[(?P<title>[^\]]+)\]"
-    r"\((?P<path>[^()#\s]+\.[A-Za-z0-9_]+)"
+    # Paths may contain spaces / unicode (no newlines, parens or hashes).
+    r"\((?P<path>[^()\n#]+?\.[A-Za-z0-9_]+)"
     r"#(?P<type>" + "|".join(ANCHOR_TYPES) + r"):"
     r"(?P<name>[A-Za-z_][A-Za-z0-9_.]*)\)"
 )
@@ -163,9 +210,8 @@ class MarkdownParser:
         """
         path = Path(doc_path)
         doc = MarkdownDoc(path=str(path))
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError:
+        text = read_text_resilient(path)
+        if text is None:
             return doc
 
         doc.frontmatter, body = _split_frontmatter(text)
@@ -205,9 +251,8 @@ class PythonASTParser:
         path = Path(file_path)
         if not path.is_file():
             return SymbolLookup(found=False)
-        try:
-            source = path.read_bytes()
-        except OSError:
+        source = read_bytes_resilient(path)
+        if source is None:
             return SymbolLookup(found=False)
 
         # Tree-sitter is fault-tolerant: syntax errors surface as ERROR
@@ -631,9 +676,8 @@ class LanguageRegistry:
         lang = self.language_for(path)
         if lang is None or lang not in self._parsers:
             return facts
-        try:
-            source = path.read_bytes()
-        except OSError:
+        source = read_bytes_resilient(path)
+        if source is None:
             return facts
         facts.language = lang
         tree = self._parsers[lang].parse(source)

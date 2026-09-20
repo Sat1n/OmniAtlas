@@ -1,6 +1,7 @@
 """Phase 9 MCP server, agent tools and headless JSON output tests."""
 
 import json
+from pathlib import Path
 
 from typer.testing import CliRunner
 
@@ -105,6 +106,25 @@ def test_rpc_errors_are_well_formed() -> None:
         server, "tools/call", {"name": "nope", "arguments": {}}
     )
     assert unknown_tool["error"]["code"] == -32602
+
+
+def test_cli_mcp_workspace_flag(tmp_path: Path) -> None:
+    """`omni-atlas mcp --workspace X` serves the graph for X from any cwd."""
+    (tmp_path / "Ping.cs").write_text("public class Ping {}\n", encoding="utf-8")
+    request = json.dumps({
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": {
+            "name": "query_topology",
+            "arguments": {"keyword": "Ping", "node_type": "class"},
+        },
+    })
+    result = runner.invoke(
+        app, ["mcp", "--workspace", str(tmp_path)], input=request + "\n"
+    )
+    assert result.exit_code == 0
+    response = json.loads(result.stdout.strip().splitlines()[-1])
+    payload = json.loads(response["result"]["content"][0]["text"])
+    assert any(match["label"] == "Ping" for match in payload["matches"])
 
 
 def test_cli_check_json_is_pure_json() -> None:

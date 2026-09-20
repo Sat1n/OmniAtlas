@@ -78,11 +78,12 @@ class ApiLinker:
         @source diagnostics: src/core/diagnostics.py#class:DiagnosticCollector
         """
         facts_by_file: dict[str, FileFacts] = {}
+        root = Path(repo_root)
         for path in files:
             suffix = Path(path).suffix.lower()
             if suffix not in FRONTEND_EXTENSIONS and suffix not in BACKEND_EXTENSIONS:
                 continue
-            facts_by_file[path] = self._registry.parse_file(path)
+            facts_by_file[path] = self._registry.parse_file(root / path)
 
         routes: list[tuple[str, str, FileFacts]] = []
         for facts in facts_by_file.values():

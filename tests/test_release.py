@@ -7,7 +7,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 import core.server as server_module
-from core.mcp import build_client_config, mcp_server_entry
+from core.mcp import build_client_config, build_codex_toml, mcp_server_entry
 from omni_atlas.cli.main import app
 from scripts.build import target_name
 
@@ -20,7 +20,8 @@ def test_init_mcp_prints_valid_json() -> None:
     payload = json.loads(result.stdout)
     entry = payload["mcpServers"]["omni-atlas"]
     assert entry["command"]  # absolute binary or uv path
-    assert entry["args"] == ["mcp"]
+    assert entry["args"][0] == "mcp"
+    assert "--workspace" in entry["args"]
     assert Path(entry["cwd"]).is_absolute()
 
 
@@ -45,11 +46,28 @@ def test_init_mcp_write_claude_out_override(tmp_path: Path) -> None:
     target = tmp_path / "claude_desktop_config.json"
     result = runner.invoke(
         app,
-        ["init-mcp", "--target", "claude", "--out", str(target), "--write"],
+        ["init-mcp", "--target", "claude", "--workspace", str(tmp_path),
+         "--out", str(target), "--write"],
     )
     assert result.exit_code == 0
     payload = json.loads(target.read_text(encoding="utf-8"))
-    assert "omni-atlas" in payload["mcpServers"]
+    entry = payload["mcpServers"]["omni-atlas"]
+    # Claude Desktop has no cwd in its schema: --workspace carries the path.
+    assert "cwd" not in entry
+    assert "--workspace" in entry["args"]
+    assert str(tmp_path.resolve()) in entry["args"]
+
+
+def test_init_mcp_entries_embed_workspace(claude: bool = False) -> None:
+    for target in ("cursor", "opencode", "codex"):
+        config = build_client_config(target, "/tmp/ws") if target != "codex" else None
+        if config is not None:
+            entry = (config.get("mcp") or config.get("mcpServers"))["omni-atlas"]
+            command = entry["command"]
+            args = command if isinstance(command, list) else entry["args"]
+            assert "mcp" in args and "--workspace" in args and "/tmp/ws" in args
+    snippet = build_codex_toml("/tmp/ws")
+    assert '"mcp", "--workspace", "/tmp/ws"' in snippet
 
 
 def test_init_mcp_write_refuses_invalid_existing_config(tmp_path: Path) -> None:
@@ -71,7 +89,8 @@ def test_init_mcp_opencode_prints_and_merges(tmp_path: Path) -> None:
     payload = json.loads(result.stdout)
     entry = payload["mcp"]["omni-atlas"]
     assert entry["type"] == "local"
-    assert entry["command"][-1] == "mcp"  # command array carries the subcommand
+    assert entry["command"][1] == "mcp"  # command array carries args
+    assert "--workspace" in entry["command"]
     assert entry["enabled"] is True
     assert entry["cwd"] == str(tmp_path.resolve())
 

@@ -226,7 +226,7 @@ class TopologyGraphBuilder:
             )
             if symbol_id not in self._nodes:
                 lookup = self._resolver.lookup(
-                    anchor.file_path, anchor.symbol_type, anchor.symbol_name
+                    self._root / anchor.file_path, anchor.symbol_type, anchor.symbol_name
                 )
                 meta: dict[str, Any] = {
                     "line": lookup.line,
@@ -296,7 +296,7 @@ class TopologyGraphBuilder:
             for path in candidates:
                 if (self._root / path).is_file():
                     lookup = self._resolver.lookup(
-                        path, match.group("type"), match.group("name")
+                        self._root / path, match.group("type"), match.group("name")
                     )
                     if lookup.found:
                         self._add_node(
@@ -411,7 +411,7 @@ class TopologyGraphBuilder:
         )
         files = [f for f in changes.code_files if Path(f).suffix != ".py"]
         for path in files:
-            facts = self._registry.parse_file(path)
+            facts = self._registry.parse_file(self._root / path)
             if (
                 not facts.symbols
                 and not facts.imports
@@ -501,7 +501,9 @@ class TopologyGraphBuilder:
         if file_path:
             _, _, rest = symbol_id.partition("#")
             symbol_type, _, symbol_name = rest.partition(":")
-            lookup = self._resolver.lookup(file_path, symbol_type, symbol_name)
+            lookup = self._resolver.lookup(
+                self._root / file_path, symbol_type, symbol_name
+            )
             if lookup.found:
                 self._add_node(
                     symbol_id,

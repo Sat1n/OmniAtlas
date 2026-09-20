@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from core.diagnostics import diagnose_file, get_collector, scan_workspace
+from core.installer import detect_cli_path
 from core.git_provider import GitProvider, StagedChanges
 from core.graph import TopologyGraphBuilder
 from core.linter import LinterEngine
@@ -343,25 +344,39 @@ class ArchitectureTools:
 CLIENT_TARGETS = ("cursor", "claude", "opencode", "codex")
 
 
-def mcp_server_entry(workspace: str | Path) -> dict[str, Any]:
-    """Command/args/cwd entry for this runtime (frozen binary or uv).
+def mcp_server_entry(
+    workspace: str | Path, include_cwd: bool = True
+) -> dict[str, Any]:
+    """Command/args/cwd entry for this runtime.
 
-    Includes the absolute workspace path so the server analyzes the
-    right project regardless of how the client spawns it.
+    Resolution order: the running CLI itself (frozen binary or the
+    ``omni-atlas`` console script in ``sys.argv[0]``), then PATH lookup,
+    then a ``uv run`` fallback. The absolute workspace always travels as
+    ``--workspace`` so clients without ``cwd`` support (Claude Desktop)
+    still analyze the right project; ``cwd`` is emitted only when the
+    client schema supports it.
     """
     workspace_path = str(Path(workspace).resolve())
-    if getattr(sys, "frozen", False):
-        return {"command": sys.executable, "args": ["mcp"], "cwd": workspace_path}
-    installed = shutil.which("omni-atlas")
-    if installed:
-        return {"command": installed, "args": ["mcp"], "cwd": workspace_path}
-    uv = shutil.which("uv") or "uv"
-    return {"command": uv, "args": ["run", "omni-atlas", "mcp"], "cwd": workspace_path}
+    cli = detect_cli_path() or shutil.which("omni-atlas")
+    if cli:
+        entry: dict[str, Any] = {
+            "command": cli,
+            "args": ["mcp", "--workspace", workspace_path],
+        }
+    else:
+        uv = shutil.which("uv") or "uv"
+        entry = {
+            "command": uv,
+            "args": ["run", "omni-atlas", "mcp", "--workspace", workspace_path],
+        }
+    if include_cwd:
+        entry["cwd"] = workspace_path
+    return entry
 
 
 def opencode_server_entry(workspace: str | Path) -> dict[str, Any]:
     """opencode local-server entry (command array includes args)."""
-    base = mcp_server_entry(workspace)
+    base = mcp_server_entry(workspace)  # cwd supported by opencode
     return {
         "type": "local",
         "command": [base["command"], *base["args"]],
@@ -371,10 +386,20 @@ def opencode_server_entry(workspace: str | Path) -> dict[str, Any]:
 
 
 def build_client_config(target: str, workspace: str | Path) -> dict[str, Any]:
-    """Build the client document (opencode uses ``mcp``, others ``mcpServers``)."""
+    """Build the client document (opencode uses ``mcp``, others ``mcpServers``).
+
+    Claude Desktop has no ``cwd`` field in its schema, so the entry omits
+    it and relies on ``--workspace`` alone.
+    """
     if target == "opencode":
         return {"mcp": {"omni-atlas": opencode_server_entry(workspace)}}
-    return {"mcpServers": {"omni-atlas": mcp_server_entry(workspace)}}
+    return {
+        "mcpServers": {
+            "omni-atlas": mcp_server_entry(
+                workspace, include_cwd=(target != "claude")
+            )
+        }
+    }
 
 
 def claude_config_path() -> Path:
@@ -445,7 +470,7 @@ def _toml_string(value: str) -> str:
 
 def build_codex_toml(workspace: str | Path) -> str:
     """Codex CLI ``[mcp_servers.omni-atlas]`` TOML section."""
-    entry = mcp_server_entry(workspace)
+    entry = mcp_server_entry(workspace)  # cwd supported by Codex CLI
     args = ", ".join(_toml_string(arg) for arg in entry["args"])
     return (
         "[mcp_servers.omni-atlas]\n"
@@ -621,6 +646,8 @@ class McpServer:
             result = handler(params)
         except ValueError as exc:
             return self._error(request_id, _INVALID_PARAMS, str(exc))
+        except SystemExit as exc:  # e.g. git_provider's fatal error path
+            return self._error(request_id, _INTERNAL_ERROR, f"internal error: {exc}")
         except Exception as exc:  # defensive: a tool bug must not kill the server
             return self._error(request_id, _INTERNAL_ERROR, f"internal error: {exc}")
         return {"jsonrpc": "2.0", "id": request_id, "result": result}

@@ -64,6 +64,48 @@ def test_csharp_facts(registry: LanguageRegistry) -> None:
     assert "System.Collections.Generic" in facts.imports
 
 
+def test_graph_and_linter_resolve_paths_against_root(tmp_path: Path) -> None:
+    """root != cwd (e.g. `mcp --workspace`) must still parse and verify."""
+    from core.graph import TopologyGraphBuilder
+    from core.linter import LinterEngine
+
+    module = tmp_path / "Rug.Core"
+    module.mkdir()
+    (module / "Engine.cs").write_text(
+        "namespace Rug;\npublic class Engine { public void Start() {} }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "AGENTS.md").write_text(
+        "# Rug\n\n[Engine](Rug.Core/Engine.cs#class:Engine)\n", encoding="utf-8"
+    )
+
+    graph = TopologyGraphBuilder(tmp_path).build().to_dict()
+    ids = {node["data"]["id"] for node in graph["nodes"]}
+    assert "Rug.Core/Engine.cs" in ids
+    assert "Rug.Core/Engine.cs#class:Engine" in ids
+
+    engine = LinterEngine(tmp_path)
+    checks = engine.check_anchors(["AGENTS.md"])
+    assert [c.found for c in checks] == [True]
+    assert checks[0].lookup.line
+    for token_check in engine.check_token_budgets(["AGENTS.md"]):
+        assert token_check.passed
+
+
+def test_linker_resolves_paths_against_root(tmp_path: Path) -> None:
+    from core.linker import ApiLinker
+
+    (tmp_path / "web.ts").write_text(
+        'fetch("/api/users", { method: "POST" });\n', encoding="utf-8"
+    )
+    (tmp_path / "api.go").write_text(
+        'package main\nfunc createUser() {}\nfunc main() { r.POST("/api/users", createUser) }\n',
+        encoding="utf-8",
+    )
+    links = ApiLinker().build_links(["web.ts", "api.go"], repo_root=tmp_path)
+    assert any(link.target_symbol == "createUser" for link in links)
+
+
 def test_anchor_regex_supports_multilang_targets() -> None:
     from core.parser import ANCHOR_RE
 

@@ -303,7 +303,7 @@ def init_mcp(
         f"✔ MCP server registered for [bold]{target}[/bold]\n"
         f"  Config: [cyan]{destination}[/cyan]\n"
         f"  Command: [cyan]{command}[/cyan]\n"
-        f"  Workspace: [cyan]{entry['cwd']}[/cyan]\n\n"
+        f"  Workspace: [cyan]{workspace_path}[/cyan]\n\n"
         "Other MCP servers in that file were preserved. Restart the client "
         "to pick up the new server."
     )
@@ -319,9 +319,17 @@ def _render_init_error(exc: Exception) -> None:
 
 
 @app.command()
-def mcp() -> None:
+def mcp(
+    workspace: str = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Repository root to analyze (default: current directory).",
+    ),
+) -> None:
     """Run the headless MCP server (stdio JSON-RPC) for AI coding agents."""
-    McpServer().serve_forever()
+    root = Path(workspace).resolve() if workspace else Path.cwd()
+    McpServer(root).serve_forever()
 
 
 @app.command()
@@ -516,8 +524,13 @@ def ui(
     headless = is_headless_environment()
 
     try:
+        bound = server.start()
+        if bound != port:
+            console.print(
+                f"[yellow]Port {port} is busy — using {bound} instead.[/yellow]"
+            )
         if headless:
-            _render_headless_panel(server.url, port)
+            _render_headless_panel(server.url, bound)
         else:
             _render_local_panel(server.url, host)
             if not no_browser:

@@ -106,9 +106,11 @@ class LinterEngine:
         """
         results: list[AnchorCheck] = []
         for doc in doc_files:
-            for anchor in self._md_parser.parse(doc).anchors:
+            for anchor in self._md_parser.parse(self._root / doc).anchors:
                 lookup = self._resolver.lookup(
-                    anchor.file_path, anchor.symbol_type, anchor.symbol_name
+                    self._root / anchor.file_path,
+                    anchor.symbol_type,
+                    anchor.symbol_name,
                 )
                 results.append(AnchorCheck(doc, anchor, lookup))
         return results
@@ -151,7 +153,7 @@ class LinterEngine:
         """
         checks: list[TokenCheck] = []
         for doc in doc_files:
-            parsed = self._md_parser.parse(doc)
+            parsed = self._md_parser.parse(self._root / doc)
             level = "L1" if Path(doc).parent == Path(".") else "L2"
             limit = L1_TOKEN_LIMIT if level == "L1" else L2_TOKEN_LIMIT
             checks.append(TokenCheck(doc, level, parsed.estimate_tokens(), limit))
@@ -181,7 +183,7 @@ class LinterEngine:
         checks: list[ApiCheck] = []
         seen: set[tuple[str, str, str]] = set()
         for file in frontend:
-            for method, url in self._registry.parse_file(file).endpoints:
+            for method, url in self._registry.parse_file(self._root / file).endpoints:
                 normalized = ApiLinker._normalize(url)
                 key = (file, method, url)
                 if key in seen:

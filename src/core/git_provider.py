@@ -21,7 +21,8 @@ from core.diagnostics import KIND_FILE_SKIPPED, get_collector
 #: Custom ignore file recognised next to the project config.
 IGNORE_FILENAME = ".omniignore"
 
-console = Console()
+#: Errors go to stderr so stdout stays parseable (--json, MCP stdio).
+console = Console(stderr=True)
 
 #: Directories never scanned for project files (shared with ``linter.py``).
 #: ``vendor`` holds third-party bundles (cytoscape, marked, dagre) that
@@ -166,9 +167,12 @@ class GitProvider:
         """
         try:
             result = subprocess.run(
-                ["git", "diff", "--cached", "--name-only"],
+                ["git", "-c", "core.quotepath=false",
+                 "diff", "--cached", "--name-only"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 check=True,
             )
         except FileNotFoundError:
@@ -260,6 +264,8 @@ class GitProvider:
                 cwd=root,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 check=True,
             )
         except (FileNotFoundError, subprocess.CalledProcessError, OSError):
@@ -278,10 +284,12 @@ class GitProvider:
         """
         try:
             result = subprocess.run(
-                ["git", "status", "--porcelain"],
+                ["git", "-c", "core.quotepath=false", "status", "--porcelain"],
                 cwd=root,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 check=True,
             )
         except (FileNotFoundError, subprocess.CalledProcessError):

@@ -53,10 +53,17 @@ on top and are reported as ``FILE_SKIPPED`` diagnostics.
 * Markdown frontmatter & anchor extractor: [MarkdownParser](src/core/parser.py#class:MarkdownParser)
 * Tree-sitter AST symbol engine: [PythonASTParser](src/core/parser.py#class:PythonASTParser)
 * Multi-language registry (Py/TS/JS/Go/Rust/C/C++/C#): [LanguageRegistry](src/core/parser.py#class:LanguageRegistry)
+* Language-aware anchor resolver: [SymbolResolver](src/core/parser.py#class:SymbolResolver)
 * Unified per-file extraction: [parse_file](src/core/parser.py#function:parse_file)
 * Block-safe excerpt extractor: [excerpt](src/core/parser.py#function:excerpt)
 * Extracted anchor record: [SymbolAnchor](src/core/parser.py#class:SymbolAnchor)
 * Parsed document record: [MarkdownDoc](src/core/parser.py#class:MarkdownDoc)
+
+Document anchors (`[Title](path.ext#type:Name)`) accept any supported
+source extension and the symbol types class/function/var/method/struct/
+enum/interface; ``SymbolResolver`` routes ``.py`` targets to the Python
+AST (rich ``@shape``/``@source`` tags) and everything else to the
+multi-language registry symbol tables.
 
 ### Linter Engine (`linter.py`)
 

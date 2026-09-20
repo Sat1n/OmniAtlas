@@ -3,7 +3,9 @@
 Implements the bidirectional collision check plus the token guard:
 
 * **Forward** — every anchor in a staged document must resolve to a real
-  AST symbol (verified via :class:`core.parser.PythonASTParser`).
+  AST symbol (verified via :class:`core.parser.SymbolResolver`, which
+  dispatches ``.py`` anchors to the Python AST and every other extension
+  to the multi-language registry).
 * **Reverse** — every staged code change must be synchronized with each
   project document that references it (Fatal Sync Enforcement,
   AGENTS.md §5 rule 3). A referencing doc missing from the staging area
@@ -25,9 +27,9 @@ from core.linker import FRONTEND_EXTENSIONS, ApiLinker
 from core.parser import (
     LanguageRegistry,
     MarkdownParser,
-    PythonASTParser,
     SymbolAnchor,
     SymbolLookup,
+    SymbolResolver,
 )
 
 #: Token ceilings defined by BLUEPRINT §1 zoom levels.
@@ -92,8 +94,8 @@ class LinterEngine:
         self._root = Path(repo_root)
         self._exclude = list(extra_excludes or [])
         self._md_parser = MarkdownParser()
-        self._ast_parser = PythonASTParser()
         self._registry = LanguageRegistry()
+        self._resolver = SymbolResolver(self._registry)
         self._linker = ApiLinker(self._registry)
 
     def check_anchors(self, doc_files: list[str]) -> list[AnchorCheck]:
@@ -105,7 +107,7 @@ class LinterEngine:
         results: list[AnchorCheck] = []
         for doc in doc_files:
             for anchor in self._md_parser.parse(doc).anchors:
-                lookup = self._ast_parser.lookup(
+                lookup = self._resolver.lookup(
                     anchor.file_path, anchor.symbol_type, anchor.symbol_name
                 )
                 results.append(AnchorCheck(doc, anchor, lookup))

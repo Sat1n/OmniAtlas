@@ -16,8 +16,9 @@ interactive dependency graph for humans and AI agents.
   Cytoscape topology (docs, files, symbols, I/O nodes, cross-language
   API calls) with live SSE updates from a zero-dependency stdlib server.
 * **Full rule validation** — `omni-atlas check` verifies symbol-level
-  Markdown anchors against the real Tree-sitter AST, enforces fatal
-  doc-sync and token budgets, and audits frontend ➔ backend API links.
+  Markdown anchors across 8 languages against the real Tree-sitter AST,
+  enforces fatal doc-sync and token budgets, and audits frontend ➔
+  backend API links.
 * **Native MCP service** — `omni-atlas mcp` speaks the Anthropic Model
   Context Protocol, letting coding agents query architecture, doc sync
   and diagnostics directly.

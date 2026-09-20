@@ -36,7 +36,7 @@ from typing import Any
 from core.config import load_config
 from core.git_provider import GitProvider
 from core.linker import ApiLinker
-from core.parser import LanguageRegistry, MarkdownParser, PythonASTParser
+from core.parser import LanguageRegistry, MarkdownParser, SymbolResolver
 
 NODE_PASS = "PASS"
 NODE_MODIFIED = "MODIFIED"
@@ -80,8 +80,8 @@ class TopologyGraphBuilder:
         self._exclude = list(extra_excludes or [])
         self._git = GitProvider()
         self._md_parser = MarkdownParser()
-        self._ast_parser = PythonASTParser()
         self._registry = LanguageRegistry()
+        self._resolver = SymbolResolver(self._registry)
         self._registry.load_custom_scm(load_config(repo_root).custom_scm)
         self._linker = ApiLinker(self._registry)
         self._nodes: dict[str, dict[str, Any]] = {}
@@ -225,7 +225,7 @@ class TopologyGraphBuilder:
                 f"{anchor.file_path}#{anchor.symbol_type}:{anchor.symbol_name}"
             )
             if symbol_id not in self._nodes:
-                lookup = self._ast_parser.lookup(
+                lookup = self._resolver.lookup(
                     anchor.file_path, anchor.symbol_type, anchor.symbol_name
                 )
                 meta: dict[str, Any] = {
@@ -295,7 +295,7 @@ class TopologyGraphBuilder:
                     return symbol_id
             for path in candidates:
                 if (self._root / path).is_file():
-                    lookup = self._ast_parser.lookup(
+                    lookup = self._resolver.lookup(
                         path, match.group("type"), match.group("name")
                     )
                     if lookup.found:
@@ -498,10 +498,10 @@ class TopologyGraphBuilder:
         """Return the backend handler symbol node, minting it if needed."""
         if symbol_id in self._nodes:
             return symbol_id
-        if Path(file_path).suffix == ".py":
+        if file_path:
             _, _, rest = symbol_id.partition("#")
             symbol_type, _, symbol_name = rest.partition(":")
-            lookup = self._ast_parser.lookup(file_path, symbol_type, symbol_name)
+            lookup = self._resolver.lookup(file_path, symbol_type, symbol_name)
             if lookup.found:
                 self._add_node(
                     symbol_id,

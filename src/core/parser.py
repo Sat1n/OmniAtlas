@@ -33,12 +33,15 @@ from core.diagnostics import (
 
 PY_LANGUAGE = Language(tspython.language())
 
-#: ``[Title](path/file.py#symbol_type:SymbolName)`` — BLUEPRINT §3 protocols.
+#: ``[Title](path/file.ext#symbol_type:SymbolName)`` — BLUEPRINT §3 protocols.
+#: Any source extension is accepted; the resolver dispatches the symbol
+#: lookup to the right engine (Python AST or the multi-language registry).
+ANCHOR_TYPES = ("class", "function", "var", "method", "struct", "enum", "interface")
 ANCHOR_RE = re.compile(
     r"\[(?P<title>[^\]]+)\]"
-    r"\((?P<path>[^()#\s]+\.py)"
-    r"#(?P<type>class|function|var):"
-    r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\)"
+    r"\((?P<path>[^()#\s]+\.[A-Za-z0-9_]+)"
+    r"#(?P<type>" + "|".join(ANCHOR_TYPES) + r"):"
+    r"(?P<name>[A-Za-z_][A-Za-z0-9_.]*)\)"
 )
 
 #: YAML frontmatter delimited by ``---`` fences at the very top of a doc.
@@ -470,6 +473,33 @@ class FileFacts:
     routes: list[tuple[str, str, str]] = field(default_factory=list)
 
 
+class SymbolResolver:
+    """Verifies document anchors against the right language engine.
+
+    ``.py`` targets go through :class:`PythonASTParser` (rich docstring
+    tags preserved); every other extension resolves through the
+    :class:`LanguageRegistry` symbol tables.
+
+    @source python: src/core/parser.py#class:PythonASTParser
+    @source multilang: src/core/parser.py#class:LanguageRegistry
+    """
+
+    def __init__(self, registry: "LanguageRegistry | None" = None) -> None:
+        self._python = PythonASTParser()
+        self._registry = registry or LanguageRegistry()
+
+    def lookup(
+        self, file_path: str | Path, symbol_type: str, symbol_name: str
+    ) -> SymbolLookup:
+        """Resolve one anchor to its declaration.
+
+        @shape return: SymbolLookup(found, line, docstring, shapes, sources)
+        """
+        if Path(file_path).suffix.lower() == ".py":
+            return self._python.lookup(file_path, symbol_type, symbol_name)
+        return self._registry.lookup(file_path, symbol_type, symbol_name)
+
+
 class LanguageRegistry:
     """Dispatches files to per-language Tree-sitter parsers.
 
@@ -513,6 +543,21 @@ class LanguageRegistry:
         """ABI version of a loaded grammar (for environment diagnosis)."""
         lang = self._languages.get(language)
         return getattr(lang, "abi_version", None) if lang is not None else None
+
+    def lookup(
+        self, file_path: str | Path, symbol_type: str, symbol_name: str
+    ) -> SymbolLookup:
+        """Find a symbol in a non-Python file (line number only).
+
+        Docstring ``@shape`` / ``@source`` tags are a Python-only concept;
+        other languages resolve to the declaration line.
+
+        @shape return: SymbolLookup(found, line)
+        """
+        for symbol in self.parse_file(file_path).symbols:
+            if symbol.kind == symbol_type and symbol.name == symbol_name:
+                return SymbolLookup(found=True, line=symbol.line)
+        return SymbolLookup(found=False)
 
     def language_for(self, file_path: str | Path) -> str | None:
         """Return the registry language id for a path, or None."""

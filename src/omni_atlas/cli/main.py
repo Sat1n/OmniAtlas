@@ -35,7 +35,7 @@ from core.mcp import (
 )
 from core.server import AtlasWebServer, is_headless_environment
 
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 
 app = typer.Typer(
     name="omni-atlas",

@@ -23,7 +23,7 @@ the Git staging area — full-repository scans are architecturally forbidden.
 | `config.py` | `.omni-atlas.toml` loader with fault-tolerant `[[custom_scm]]` query validation |
 | `diagnostics.py` | Diagnostic collector, path sanitizer & workspace health scans (doctor / report-bug) |
 | `mcp.py` | Headless MCP server (stdio JSON-RPC) & agent tools (context, doc sync, topology, diagnostics) |
-| `installer.py` | One-shot pre-commit hook installer (`omni-atlas init`) |
+| `installer.py` | Pre-commit hook installer with PATH → uv CLI resolution (advisory when tooling is absent) |
 | `graph.py` | Topology DAG builder, Cytoscape converter & compound container grouping |
 | `server.py` | Zero-dependency stdlib web server: dashboard, SSE change stream (`/api/events`), editor launch (`POST /api/open-in-editor`) & IDE detection (`/api/ides`) |
 

@@ -1,7 +1,16 @@
 """One-shot Git pre-commit hook installer (``omni-atlas init``).
 
 Locates the repository's effective hooks directory, then injects a guard
-block that invokes ``uv run omni-atlas check`` before every commit.
+block that runs ``omni-atlas check`` before every commit. The guard
+resolves the CLI the same way a developer would:
+
+1. ``omni-atlas`` on ``PATH`` (``uv tool install`` / ``pip install``)
+2. ``uv run omni-atlas`` (project-local dependency)
+3. otherwise: warn and let the commit through — tooling problems must
+   never block work.
+
+Only exit code ``1`` (a real lint violation) blocks the commit;
+invocation failures are advisory.
 
 Installation is fully idempotent and non-destructive:
 
@@ -19,13 +28,26 @@ BLOCK_START = "# >>> OmniAtlas pre-commit hook >>>"
 BLOCK_END = "# <<< OmniAtlas pre-commit hook <<<"
 
 #: Guard script injected into ``pre-commit`` (BLUEPRINT §6 rule 4: zero rot).
+#: Exit-code contract: only `check`'s exit 1 (lint violation) blocks the
+#: commit; missing tooling (2) warns and lets the commit through.
 HOOK_BLOCK = f"""{BLOCK_START}
 # Injected by `omni-atlas init` — blocks commits when staged code changes
 # are not synchronized with their referencing documentation.
-if command -v uv >/dev/null 2>&1; then
-    uv run omni-atlas check || exit 1
-else
-    echo "OmniAtlas: 'uv' not found on PATH — skipping documentation sync check." >&2
+omni_atlas_check() {{
+    if command -v omni-atlas >/dev/null 2>&1; then
+        omni-atlas check
+    elif command -v uv >/dev/null 2>&1; then
+        uv run omni-atlas check 2>/dev/null
+    else
+        return 2
+    fi
+}}
+omni_atlas_check
+omni_atlas_status=$?
+if [ "$omni_atlas_status" -eq 1 ]; then
+    exit 1
+elif [ "$omni_atlas_status" -ne 0 ]; then
+    echo "OmniAtlas: CLI unavailable — skipping documentation sync check (install with: uv tool install omni-atlas)." >&2
 fi
 {BLOCK_END}"""
 

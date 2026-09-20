@@ -23,9 +23,10 @@ the Git staging area — full-repository scans are architecturally forbidden.
 | `config.py` | `.omni-atlas.toml` loader with fault-tolerant `[[custom_scm]]` query validation |
 | `diagnostics.py` | Diagnostic collector, path sanitizer & workspace health scans (doctor / report-bug) |
 | `mcp.py` | Headless MCP server (stdio JSON-RPC) & agent tools (context, doc sync, topology, diagnostics) |
-| `installer.py` | Pre-commit hook installer with PATH → uv CLI resolution (advisory when tooling is absent) |
+| `installer.py` | Pre-commit hook installer embedding the running CLI path (frozen/argv0 → PATH → uv, advisory when absent) |
+| `scaffold.py` | `init` documentation templates (BLUEPRINT / AGENTS / L2 README) with strict no-overwrite semantics |
 | `graph.py` | Topology DAG builder, Cytoscape converter & compound container grouping |
-| `server.py` | Zero-dependency stdlib web server: dashboard, SSE change stream (`/api/events`), editor launch (`POST /api/open-in-editor`) & IDE detection (`/api/ides`) |
+| `server.py` | Zero-dependency stdlib web server (busy-port fallback on start): dashboard, SSE change stream (`/api/events`), editor launch (`POST /api/open-in-editor`) & IDE detection (`/api/ides`) |
 
 ## Symbol Anchors
 
@@ -52,10 +53,21 @@ on top and are reported as ``FILE_SKIPPED`` diagnostics.
 * Markdown frontmatter & anchor extractor: [MarkdownParser](src/core/parser.py#class:MarkdownParser)
 * Tree-sitter AST symbol engine: [PythonASTParser](src/core/parser.py#class:PythonASTParser)
 * Multi-language registry (Py/TS/JS/Go/Rust/C/C++/C#): [LanguageRegistry](src/core/parser.py#class:LanguageRegistry)
+* Language-aware anchor resolver: [SymbolResolver](src/core/parser.py#class:SymbolResolver)
 * Unified per-file extraction: [parse_file](src/core/parser.py#function:parse_file)
 * Block-safe excerpt extractor: [excerpt](src/core/parser.py#function:excerpt)
+* Encoding-safe text reader (PermissionError retry): [read_text_resilient](src/core/parser.py#function:read_text_resilient)
+* Encoding-safe byte reader: [read_bytes_resilient](src/core/parser.py#function:read_bytes_resilient)
 * Extracted anchor record: [SymbolAnchor](src/core/parser.py#class:SymbolAnchor)
 * Parsed document record: [MarkdownDoc](src/core/parser.py#class:MarkdownDoc)
+
+Document anchors (`[Title](path.ext#type:Name)`) accept any supported
+source extension (including paths with spaces or non-ASCII characters)
+and the symbol types class/function/var/method/struct/enum/interface;
+``SymbolResolver`` routes ``.py`` targets to the Python AST (rich
+``@shape``/``@source`` tags) and everything else to the multi-language
+registry symbol tables. Undecodable document bytes degrade to
+replacement characters instead of aborting a scan.
 
 ### Linter Engine (`linter.py`)
 
@@ -80,6 +92,7 @@ on top and are reported as ``FILE_SKIPPED`` diagnostics.
 * Agent tool implementations: [ArchitectureTools](src/core/mcp.py#class:ArchitectureTools)
 * Tool catalogue: [TOOL_SPECS](src/core/mcp.py#var:TOOL_SPECS)
 * Client config entry (runtime detection): [mcp_server_entry](src/core/mcp.py#function:mcp_server_entry)
+* Running-CLI path detector: [detect_cli_path](src/core/installer.py#function:detect_cli_path)
 * Client config document builder: [build_client_config](src/core/mcp.py#function:build_client_config)
 * Safe config merge (preserves siblings): [merge_client_config](src/core/mcp.py#function:merge_client_config)
 * Codex CLI TOML section builder: [build_codex_toml](src/core/mcp.py#function:build_codex_toml)
@@ -94,7 +107,9 @@ AI coding agents. ``omni-atlas check --json`` and ``omni-atlas graph
 ``omni-atlas init-mcp`` generates (or merges, with ``--write``) the
 client configuration for Cursor, Claude Desktop, opencode (JSON) and
 Codex CLI (text-level TOML section merge keeping the rest of the file
-byte-identical).
+byte-identical). Entries always carry ``--workspace <abs path>`` so
+clients without ``cwd`` support (Claude Desktop) analyze the right
+project; ``omni-atlas mcp --workspace`` accepts the same override.
 
 ### Distribution (`scripts/build.py` + `.github/workflows/release.yml`)
 
@@ -132,6 +147,17 @@ paste-safe Markdown/JSON report with all paths rebased.
 * Pre-commit hook installer: [HookInstaller](src/core/installer.py#class:HookInstaller)
 * Idempotent guard injection: [install](src/core/installer.py#function:install)
 * Installation outcome record: [InstallResult](src/core/installer.py#class:InstallResult)
+
+### Project Scaffolding (`scaffold.py`)
+
+* Non-destructive template creator: [Scaffolder](src/core/scaffold.py#class:Scaffolder)
+* Scaffold entrypoint: [scaffold](src/core/scaffold.py#function:scaffold)
+* Per-file result record: [ScaffoldResult](src/core/scaffold.py#class:ScaffoldResult)
+
+``omni-atlas init`` installs the hook and scaffolds ``BLUEPRINT.md``,
+``AGENTS.md`` and an L2 ``README.md`` example when missing. Every example
+anchor sits inside inline code so the first ``omni-atlas check`` is
+green by construction; existing files are never touched.
 
 ### Topology Graph Engine (`graph.py`)
 

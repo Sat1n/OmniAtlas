@@ -64,6 +64,96 @@ def test_csharp_facts(registry: LanguageRegistry) -> None:
     assert "System.Collections.Generic" in facts.imports
 
 
+def test_graph_and_linter_resolve_paths_against_root(tmp_path: Path) -> None:
+    """root != cwd (e.g. `mcp --workspace`) must still parse and verify."""
+    from core.graph import TopologyGraphBuilder
+    from core.linter import LinterEngine
+
+    module = tmp_path / "Rug.Core"
+    module.mkdir()
+    (module / "Engine.cs").write_text(
+        "namespace Rug;\npublic class Engine { public void Start() {} }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "AGENTS.md").write_text(
+        "# Rug\n\n[Engine](Rug.Core/Engine.cs#class:Engine)\n", encoding="utf-8"
+    )
+
+    graph = TopologyGraphBuilder(tmp_path).build().to_dict()
+    ids = {node["data"]["id"] for node in graph["nodes"]}
+    assert "Rug.Core/Engine.cs" in ids
+    assert "Rug.Core/Engine.cs#class:Engine" in ids
+
+    engine = LinterEngine(tmp_path)
+    checks = engine.check_anchors(["AGENTS.md"])
+    assert [c.found for c in checks] == [True]
+    assert checks[0].lookup.line
+    for token_check in engine.check_token_budgets(["AGENTS.md"]):
+        assert token_check.passed
+
+
+def test_linker_resolves_paths_against_root(tmp_path: Path) -> None:
+    from core.linker import ApiLinker
+
+    (tmp_path / "web.ts").write_text(
+        'fetch("/api/users", { method: "POST" });\n', encoding="utf-8"
+    )
+    (tmp_path / "api.go").write_text(
+        'package main\nfunc createUser() {}\nfunc main() { r.POST("/api/users", createUser) }\n',
+        encoding="utf-8",
+    )
+    links = ApiLinker().build_links(["web.ts", "api.go"], repo_root=tmp_path)
+    assert any(link.target_symbol == "createUser" for link in links)
+
+
+def test_anchor_regex_supports_multilang_targets() -> None:
+    from core.parser import ANCHOR_RE
+
+    match = ANCHOR_RE.search("[Engine](Rug.Core/Engine.cs#class:Engine)")
+    assert match and match.group("path") == "Rug.Core/Engine.cs"
+    match = ANCHOR_RE.search("[Start](cmd/main.go#method:Start)")
+    assert match and match.group("type") == "method"
+    match = ANCHOR_RE.search("[Point](src/lib.rs#struct:Point)")
+    assert match and match.group("type") == "struct"
+    # Legacy Python anchors keep parsing unchanged.
+    match = ANCHOR_RE.search("[P](src/core/parser.py#class:MarkdownParser)")
+    assert match and match.group("path").endswith(".py")
+
+
+def test_symbol_resolver_dispatches_by_language() -> None:
+    from core.parser import SymbolResolver
+
+    resolver = SymbolResolver()
+    found = resolver.lookup(FIXTURES / "Program.cs", "class", "Engine")
+    assert found.found and found.line
+    missing = resolver.lookup(FIXTURES / "Program.cs", "class", "Missing")
+    assert not missing.found
+    # Python targets keep the rich docstring-tag path.
+    python = resolver.lookup("src/core/parser.py", "class", "MarkdownParser")
+    assert python.found
+
+
+def test_linter_validates_csharp_anchor(tmp_path: Path) -> None:
+    from core.linter import LinterEngine
+
+    doc = tmp_path / "ARCH.md"
+    doc.write_text(
+        "---\nid: arch\n---\n\n# Arch\n\n"
+        "[Engine](tests/fixtures/Program.cs#class:Engine)\n",
+        encoding="utf-8",
+    )
+    engine = LinterEngine(".")
+    checks = engine.check_anchors([str(doc)])
+    assert len(checks) == 1 and checks[0].found and checks[0].lookup.line
+
+    doc.write_text(
+        "# Arch\n\n[Engine](tests/fixtures/Program.cs#class:Gone)\n",
+        encoding="utf-8",
+    )
+    checks = engine.check_anchors([str(doc)])
+    assert checks and not checks[0].found  # broken anchors are surfaced
+
+
 def test_api_linker_matches_fixtures(registry: LanguageRegistry) -> None:
     files = [str(p) for p in FIXTURES.iterdir()] + [
         "src/ui/index.html",

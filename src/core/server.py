@@ -283,6 +283,41 @@ class AtlasWebServer:
         self._httpd: ThreadingHTTPServer | None = None
 
     @property
+    def port(self) -> int:
+        """Port actually bound (after any fallback scan)."""
+        return self._port
+
+    def start(self, auto_port: bool = True, port_scan: int = 20) -> int:
+        """Bind the listening socket, scanning upward when the port is busy.
+
+        @shape return: int (port actually bound)
+        """
+        handler = _build_handler(self._root, self._watcher)
+        candidates = [self._port]
+        if auto_port and self._port != 0:
+            candidates += [self._port + offset for offset in range(1, port_scan + 1)]
+        last_error: OSError | None = None
+        for candidate in candidates:
+            try:
+                self._httpd = ThreadingHTTPServer((self._host, candidate), handler)
+                break
+            except OSError as exc:
+                last_error = exc
+        if self._httpd is None:
+            raise last_error if last_error is not None else OSError(
+                "unable to bind any candidate port"
+            )
+        # Port 0 means "pick an ephemeral port" — record the real one.
+        self._port = self._httpd.server_address[1]
+        return self._port
+
+    def close(self) -> None:
+        """Release the listening socket without serving (test hygiene)."""
+        if self._httpd is not None:
+            self._httpd.server_close()
+            self._httpd = None
+
+    @property
     def url(self) -> str:
         """Browser-friendly URL (0.0.0.0 binds every interface but is not
         itself a dialable address).
@@ -301,14 +336,15 @@ class AtlasWebServer:
         @source topology: src/core/graph.py#class:TopologyGraphBuilder
         @source events: src/core/server.py#class:_RepoWatcher
         """
+        if self._httpd is None:
+            self.start()
         self._watcher.start()
-        handler = _build_handler(self._root, self._watcher)
-        self._httpd = ThreadingHTTPServer((self._host, self._port), handler)
         try:
             self._httpd.serve_forever()
         finally:
             self._watcher.stop()
             self._httpd.server_close()
+            self._httpd = None
 
     def shutdown(self) -> None:
         """Stop the request loop (safe to call from another thread)."""

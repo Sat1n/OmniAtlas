@@ -3,9 +3,10 @@
 import shutil
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
-from core.installer import BLOCK_START, HookInstaller
+from core.installer import BLOCK_START, HookInstaller, detect_cli_path
 
 
 def _git_repo(tmp_path: Path) -> Path:
@@ -16,8 +17,10 @@ def _git_repo(tmp_path: Path) -> Path:
 def _script_dir(tmp_path: Path) -> Path:
     """A PATH that can spawn bash but demonstrably lacks uv/omni-atlas."""
     bin_dir = tmp_path / "minbin"
-    bin_dir.mkdir()
-    (bin_dir / "bash").symlink_to(shutil.which("bash"))
+    bin_dir.mkdir(exist_ok=True)
+    link = bin_dir / "bash"
+    if not link.exists():
+        link.symlink_to(shutil.which("bash"))
     return bin_dir
 
 
@@ -87,3 +90,56 @@ def test_hook_blocks_only_on_exit_one(tmp_path: Path) -> None:
         text=True,
     )
     assert passed.returncode == 0
+
+
+def test_detect_cli_path_prefers_frozen_and_argv0(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", "/fake/frozen-bin")
+    assert detect_cli_path() == "/fake/frozen-bin"
+    monkeypatch.delattr(sys, "frozen")
+
+    fake = tmp_path / "omni-atlas"
+    fake.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake.chmod(0o755)
+    monkeypatch.setattr(sys, "argv", [str(fake), "init"])
+    assert detect_cli_path() == str(fake)
+
+    monkeypatch.setattr(sys, "argv", ["/usr/bin/pytest", "tests"])
+    assert detect_cli_path() is None  # indirect runs fall back to PATH/uv
+
+
+def test_hook_embeds_frozen_cli_and_uses_it(tmp_path: Path, monkeypatch) -> None:
+    """A frozen binary's absolute path is embedded and takes priority."""
+    fake_cli = tmp_path / "omni-atlas-linux-x64"
+    fake_cli.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    fake_cli.chmod(0o755)
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    repo = _git_repo(repo_dir)
+
+    install = HookInstaller(repo, cli_path=str(fake_cli)).install()
+    text = install.hook_path.read_text(encoding="utf-8")
+    assert str(fake_cli) in text  # embedded absolute path
+
+    # Runtime: the embedded CLI exits 1 → commit blocked even without PATH.
+    blocked = subprocess.run(
+        [shutil.which("bash"), str(install.hook_path)],
+        cwd=repo,
+        env={"PATH": str(_script_dir(tmp_path))},
+        capture_output=True,
+        text=True,
+    )
+    assert blocked.returncode == 1
+
+    # A stale embedded path degrades gracefully to the advisory chain.
+    fake_cli.unlink()
+    install = HookInstaller(repo, cli_path=str(fake_cli)).install()
+    skipped = subprocess.run(
+        [shutil.which("bash"), str(install.hook_path)],
+        cwd=repo,
+        env={"PATH": str(_script_dir(tmp_path))},
+        capture_output=True,
+        text=True,
+    )
+    assert skipped.returncode == 0
+    assert "skipping" in skipped.stderr

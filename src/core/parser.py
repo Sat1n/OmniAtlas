@@ -16,6 +16,7 @@ engines only load the precise boundaries of the requested symbol.
 """
 
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -33,12 +34,61 @@ from core.diagnostics import (
 
 PY_LANGUAGE = Language(tspython.language())
 
-#: ``[Title](path/file.py#symbol_type:SymbolName)`` — BLUEPRINT §3 protocols.
+#: Transient Windows file-lock retries (antivirus / editor save races).
+READ_RETRIES = 1
+READ_RETRY_DELAY = 0.05
+
+
+def read_text_resilient(
+    path: str | Path, encoding: str = "utf-8", errors: str = "replace"
+) -> str | None:
+    """Read text safely: retry transient PermissionError, never raise.
+
+    Undecodable bytes fall back to ``errors="replace"`` so a single
+    mojibake document can never abort a whole-tree scan.
+
+    @shape return: str | None (None when unreadable)
+    """
+    for attempt in range(READ_RETRIES + 1):
+        try:
+            return Path(path).read_text(encoding=encoding, errors=errors)
+        except PermissionError:
+            if attempt < READ_RETRIES:
+                time.sleep(READ_RETRY_DELAY)
+                continue
+            return None
+        except OSError:
+            return None
+    return None
+
+
+def read_bytes_resilient(path: str | Path) -> bytes | None:
+    """Read bytes safely: retry transient PermissionError, never raise.
+
+    @shape return: bytes | None (None when unreadable)
+    """
+    for attempt in range(READ_RETRIES + 1):
+        try:
+            return Path(path).read_bytes()
+        except PermissionError:
+            if attempt < READ_RETRIES:
+                time.sleep(READ_RETRY_DELAY)
+                continue
+            return None
+        except OSError:
+            return None
+    return None
+
+#: ``[Title](path/file.ext#symbol_type:SymbolName)`` — BLUEPRINT §3 protocols.
+#: Any source extension is accepted; the resolver dispatches the symbol
+#: lookup to the right engine (Python AST or the multi-language registry).
+ANCHOR_TYPES = ("class", "function", "var", "method", "struct", "enum", "interface")
 ANCHOR_RE = re.compile(
     r"\[(?P<title>[^\]]+)\]"
-    r"\((?P<path>[^()#\s]+\.py)"
-    r"#(?P<type>class|function|var):"
-    r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\)"
+    # Paths may contain spaces / unicode (no newlines, parens or hashes).
+    r"\((?P<path>[^()\n#]+?\.[A-Za-z0-9_]+)"
+    r"#(?P<type>" + "|".join(ANCHOR_TYPES) + r"):"
+    r"(?P<name>[A-Za-z_][A-Za-z0-9_.]*)\)"
 )
 
 #: YAML frontmatter delimited by ``---`` fences at the very top of a doc.
@@ -160,9 +210,8 @@ class MarkdownParser:
         """
         path = Path(doc_path)
         doc = MarkdownDoc(path=str(path))
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError:
+        text = read_text_resilient(path)
+        if text is None:
             return doc
 
         doc.frontmatter, body = _split_frontmatter(text)
@@ -202,9 +251,8 @@ class PythonASTParser:
         path = Path(file_path)
         if not path.is_file():
             return SymbolLookup(found=False)
-        try:
-            source = path.read_bytes()
-        except OSError:
+        source = read_bytes_resilient(path)
+        if source is None:
             return SymbolLookup(found=False)
 
         # Tree-sitter is fault-tolerant: syntax errors surface as ERROR
@@ -470,6 +518,33 @@ class FileFacts:
     routes: list[tuple[str, str, str]] = field(default_factory=list)
 
 
+class SymbolResolver:
+    """Verifies document anchors against the right language engine.
+
+    ``.py`` targets go through :class:`PythonASTParser` (rich docstring
+    tags preserved); every other extension resolves through the
+    :class:`LanguageRegistry` symbol tables.
+
+    @source python: src/core/parser.py#class:PythonASTParser
+    @source multilang: src/core/parser.py#class:LanguageRegistry
+    """
+
+    def __init__(self, registry: "LanguageRegistry | None" = None) -> None:
+        self._python = PythonASTParser()
+        self._registry = registry or LanguageRegistry()
+
+    def lookup(
+        self, file_path: str | Path, symbol_type: str, symbol_name: str
+    ) -> SymbolLookup:
+        """Resolve one anchor to its declaration.
+
+        @shape return: SymbolLookup(found, line, docstring, shapes, sources)
+        """
+        if Path(file_path).suffix.lower() == ".py":
+            return self._python.lookup(file_path, symbol_type, symbol_name)
+        return self._registry.lookup(file_path, symbol_type, symbol_name)
+
+
 class LanguageRegistry:
     """Dispatches files to per-language Tree-sitter parsers.
 
@@ -513,6 +588,21 @@ class LanguageRegistry:
         """ABI version of a loaded grammar (for environment diagnosis)."""
         lang = self._languages.get(language)
         return getattr(lang, "abi_version", None) if lang is not None else None
+
+    def lookup(
+        self, file_path: str | Path, symbol_type: str, symbol_name: str
+    ) -> SymbolLookup:
+        """Find a symbol in a non-Python file (line number only).
+
+        Docstring ``@shape`` / ``@source`` tags are a Python-only concept;
+        other languages resolve to the declaration line.
+
+        @shape return: SymbolLookup(found, line)
+        """
+        for symbol in self.parse_file(file_path).symbols:
+            if symbol.kind == symbol_type and symbol.name == symbol_name:
+                return SymbolLookup(found=True, line=symbol.line)
+        return SymbolLookup(found=False)
 
     def language_for(self, file_path: str | Path) -> str | None:
         """Return the registry language id for a path, or None."""
@@ -586,9 +676,8 @@ class LanguageRegistry:
         lang = self.language_for(path)
         if lang is None or lang not in self._parsers:
             return facts
-        try:
-            source = path.read_bytes()
-        except OSError:
+        source = read_bytes_resilient(path)
+        if source is None:
             return facts
         facts.language = lang
         tree = self._parsers[lang].parse(source)

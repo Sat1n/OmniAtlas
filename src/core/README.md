@@ -24,6 +24,7 @@ the Git staging area — full-repository scans are architecturally forbidden.
 | `diagnostics.py` | Diagnostic collector, path sanitizer & workspace health scans (doctor / report-bug) |
 | `mcp.py` | Headless MCP server (stdio JSON-RPC) & agent tools (context, doc sync, topology, diagnostics) |
 | `installer.py` | Pre-commit hook installer with PATH → uv CLI resolution (advisory when tooling is absent) |
+| `scaffold.py` | `init` documentation templates (BLUEPRINT / AGENTS / L2 README) with strict no-overwrite semantics |
 | `graph.py` | Topology DAG builder, Cytoscape converter & compound container grouping |
 | `server.py` | Zero-dependency stdlib web server: dashboard, SSE change stream (`/api/events`), editor launch (`POST /api/open-in-editor`) & IDE detection (`/api/ides`) |
 
@@ -132,6 +133,17 @@ paste-safe Markdown/JSON report with all paths rebased.
 * Pre-commit hook installer: [HookInstaller](src/core/installer.py#class:HookInstaller)
 * Idempotent guard injection: [install](src/core/installer.py#function:install)
 * Installation outcome record: [InstallResult](src/core/installer.py#class:InstallResult)
+
+### Project Scaffolding (`scaffold.py`)
+
+* Non-destructive template creator: [Scaffolder](src/core/scaffold.py#class:Scaffolder)
+* Scaffold entrypoint: [scaffold](src/core/scaffold.py#function:scaffold)
+* Per-file result record: [ScaffoldResult](src/core/scaffold.py#class:ScaffoldResult)
+
+``omni-atlas init`` installs the hook and scaffolds ``BLUEPRINT.md``,
+``AGENTS.md`` and an L2 ``README.md`` example when missing. Every example
+anchor sits inside inline code so the first ``omni-atlas check`` is
+green by construction; existing files are never touched.
 
 ### Topology Graph Engine (`graph.py`)
 

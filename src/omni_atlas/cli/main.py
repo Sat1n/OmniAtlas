@@ -24,6 +24,7 @@ from core.git_provider import GitProvider, StagedChanges
 from core.graph import TopologyGraphBuilder
 from core.installer import HookInstaller, InstallResult
 from core.linter import AnchorCheck, ApiCheck, LinterEngine, SyncCheck, TokenCheck
+from core.scaffold import ScaffoldResult, Scaffolder
 from core.mcp import (
     CLIENT_TARGETS,
     McpServer,
@@ -35,7 +36,7 @@ from core.mcp import (
 )
 from core.server import AtlasWebServer, is_headless_environment
 
-VERSION = "0.2.2"
+VERSION = "0.3.0"
 
 app = typer.Typer(
     name="omni-atlas",
@@ -418,8 +419,19 @@ def report_bug(
 
 
 @app.command()
-def init() -> None:
-    """Install the OmniAtlas pre-commit Git hook (idempotent)."""
+def init(
+    no_scaffold: bool = typer.Option(
+        False,
+        "--no-scaffold",
+        help="Only install the hook; skip the BLUEPRINT/AGENTS/L2 templates.",
+    ),
+    module_dir: str = typer.Option(
+        "src",
+        "--module-dir",
+        help="Directory that receives the L2 README example.",
+    ),
+) -> None:
+    """Install the pre-commit hook and scaffold documentation templates."""
     try:
         result = HookInstaller().install()
     except RuntimeError as exc:
@@ -429,7 +441,40 @@ def init() -> None:
         raise typer.Exit(code=1)
 
     _render_install_result(result)
+
+    if not no_scaffold:
+        scaffold_results = Scaffolder().scaffold(module_dir)
+        _render_scaffold_result(scaffold_results)
     raise typer.Exit(code=0)
+
+
+def _render_scaffold_result(results: list[ScaffoldResult]) -> None:
+    """Friendly Rich panel for the scaffolded documentation skeletons."""
+    table = Table(show_header=True, header_style="bold magenta", expand=False)
+    table.add_column("Status", justify="center", no_wrap=True)
+    table.add_column("File")
+    created = 0
+    for result in results:
+        if result.status == "created":
+            created += 1
+            status = "[bold green][CREATED][/bold green]"
+        else:
+            status = "[dim][EXISTS][/dim]"
+        table.add_row(status, str(result.path))
+    body = table
+    hint = (
+        f"{created} template(s) created — fill the placeholders "
+        "(`<...>`) and keep the frontmatter ids unique. "
+        "Existing files were left untouched."
+    )
+    console.print(
+        Panel(
+            body,
+            title="Documentation Scaffold",
+            subtitle=hint,
+            border_style="green" if created else "cyan",
+        )
+    )
 
 
 def _render_install_result(result: InstallResult) -> None:

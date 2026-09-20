@@ -32,7 +32,7 @@ from core.parser import ANCHOR_RE
 from core.linker import FRONTEND_EXTENSIONS
 
 #: Server software version reported in the initialize handshake.
-SERVER_VERSION = "0.2.2"
+SERVER_VERSION = "0.3.0"
 
 #: MCP revision implemented (echoed back when the client speaks a newer one).
 PROTOCOL_VERSION = "2024-11-05"

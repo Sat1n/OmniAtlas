@@ -50,6 +50,12 @@ uv tool install omni-atlas
 pip install omni-atlas
 ```
 
+Inside any project, one command wires everything up:
+
+```bash
+omni-atlas init   # pre-commit hook + BLUEPRINT/AGENTS/L2 templates
+```
+
 Single-file binaries (no Python needed) are published on the
 [GitHub Releases](https://github.com/Sat1n/OmniAtlas/releases) page for
 Linux x64, macOS arm64 and Windows x64 — download, `chmod +x`, run.
